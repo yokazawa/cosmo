@@ -620,6 +620,13 @@ func (r *Router) initModules(ctx context.Context) error {
 
 	moduleList = sortModules(moduleList)
 
+	// Router.postOriginHandlers registers HeaderPropagation.
+	// Then, the initModules function appends custom modules after that.
+	// As a result, HeaderPropagation is called first.
+	// Since HeaderPropagation always returns a new response object, the OnOriginResponse of custom modules will never be called.
+	// This is problematic, so Router.postOriginHandlers should place HeaderPropagation after the custom modules.
+	modulesPostOriginHandlers := make([]TransportPostHandler, 0, len(moduleList))
+
 	for _, moduleInfo := range moduleList {
 		now := time.Now()
 
@@ -673,7 +680,7 @@ func (r *Router) initModules(ctx context.Context) error {
 		}
 
 		if handler, ok := moduleInstance.(EnginePostOriginHandler); ok {
-			r.postOriginHandlers = append(r.postOriginHandlers, handler.OnOriginResponse)
+			modulesPostOriginHandlers = append(modulesPostOriginHandlers, handler.OnOriginResponse)
 		}
 
 		if handler, ok := moduleInstance.(TracePropagationProvider); ok {
@@ -702,6 +709,11 @@ func (r *Router) initModules(ctx context.Context) error {
 			zap.String("duration", time.Since(now).String()),
 		)
 	}
+
+	for _, handler := range r.postOriginHandlers {
+		modulesPostOriginHandlers = append(modulesPostOriginHandlers, handler)
+	}
+	r.postOriginHandlers = modulesPostOriginHandlers
 
 	return nil
 }
