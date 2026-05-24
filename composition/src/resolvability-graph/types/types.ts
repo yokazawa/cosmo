@@ -1,10 +1,13 @@
 export type VisitNodeResult = {
   visited: boolean;
   areDescendantsResolved: boolean;
+  isExternal?: true;
   isRevisitedNode?: true;
 };
 
 export type FieldName = string;
+
+export type FieldCoords = `${TypeName}.${FieldName}`;
 
 export type NodeName = `${SubgraphName}.${TypeName}`;
 
@@ -15,7 +18,7 @@ export type SubgraphName = string;
 export type TypeName = string;
 
 export type RootFieldData = {
-  coords: `${TypeName}.${FieldName}`;
+  coords: FieldCoords;
   message: string;
   subgraphNames: Set<SubgraphName>;
 };

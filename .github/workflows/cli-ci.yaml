@@ -37,8 +37,9 @@ jobs:
       - name: Generate router templates
         run: pnpm --filter ./cli compile-templates
 
-      - name: Check if git is not dirty after generating files
-        run: git diff --no-ext-diff --exit-code
+      - uses: ./.github/actions/git-dirty-check
+        with:
+          package-name: cli
 
       - name: Build Node.js NPM Package
         run: pnpm --filter ./cli --filter ./connect --filter ./shared --filter ./composition --filter ./protographic run build
@@ -54,10 +55,15 @@ jobs:
       - name: Get Coverage
         run: pnpm run --filter wgc coverage
 
-      - name: Upload results to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Upload Coverage to Codecov
+        uses: ./.github/actions/codecov-upload-pr
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          artifact-name: cli-one
+          coverage-path: |
+            cli/coverage/clover.xml
+            cli/coverage/coverage-final.json
+          retention-days: 14
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
   build_test_node_matrix:
     timeout-minutes: 10
@@ -65,7 +71,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: ['20.x', '22.x']
+        node-version: ["22.x", "24.x"]
 
     steps:
       - uses: actions/checkout@v4

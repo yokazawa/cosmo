@@ -3,6 +3,7 @@ package metric
 import (
 	"net/url"
 	"regexp"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/wundergraph/cosmo/router/pkg/config"
@@ -25,6 +26,7 @@ type PrometheusConfig struct {
 	GraphqlCache    bool
 	EngineStats     EngineStatsConfig
 	CircuitBreaker  bool
+	CostStats       config.CostStats
 	// Metrics to exclude from Prometheus exporter
 	ExcludeMetrics []*regexp.Regexp
 	// Metric labels to exclude from Prometheus exporter
@@ -41,10 +43,14 @@ type PrometheusConfig struct {
 type PrometheusSchemaFieldUsage struct {
 	Enabled             bool
 	IncludeOperationSha bool
-	// SampleRate controls the percentage of requests to sample for schema field usage metrics (0.0 to 1.0).
-	// Uses probabilistic random sampling to ensure all operations get ~X% statistical coverage.
-	// Supports any rate: 1.0 (100%), 0.8 (80%), 0.5 (50%), 0.1 (10%), 0.01 (1%), etc.
-	SampleRate float64
+	Exporter            PrometheusSchemaFieldUsageExporter
+}
+
+type PrometheusSchemaFieldUsageExporter struct {
+	BatchSize     int
+	QueueSize     int
+	Interval      time.Duration
+	ExportTimeout time.Duration
 }
 
 type OpenTelemetryExporter struct {
@@ -70,12 +76,22 @@ func (e *EngineStatsConfig) Enabled() bool {
 	return e.Subscription
 }
 
+type LogExporterConfig struct {
+	Enabled        bool
+	ExcludeMetrics []*regexp.Regexp
+	// IncludeMetrics is an allowlist. If set, only metrics matching these patterns are logged.
+	IncludeMetrics []*regexp.Regexp
+	// ExportInterval overrides the default export interval. If zero, the default interval is used.
+	ExportInterval time.Duration
+}
+
 type OpenTelemetry struct {
 	Enabled         bool
 	ConnectionStats bool
 	RouterRuntime   bool
 	GraphqlCache    bool
 	CircuitBreaker  bool
+	CostStats       config.CostStats
 	EngineStats     EngineStatsConfig
 	Exporters       []*OpenTelemetryExporter
 	// Metrics to exclude from the OTLP exporter.
@@ -83,8 +99,9 @@ type OpenTelemetry struct {
 	// Metric labels to exclude from the OTLP exporter.
 	ExcludeMetricLabels []*regexp.Regexp
 	// TestReader is used for testing purposes. If set, the reader will be used instead of the configured exporters.
-	TestReader sdkmetric.Reader
-	Streams    bool
+	TestReader  sdkmetric.Reader
+	Streams     bool
+	LogExporter LogExporterConfig
 }
 
 func GetDefaultExporter(cfg *Config) *OpenTelemetryExporter {
@@ -153,7 +170,7 @@ func DefaultConfig(serviceVersion string) *Config {
 				{
 					Disabled: false,
 					Endpoint: "http://localhost:4318",
-					Exporter: otelconfig.ExporterOLTPHTTP,
+					Exporter: otelconfig.ExporterOTLPHTTP,
 					HTTPPath: otelconfig.DefaultMetricsPath,
 				},
 			},

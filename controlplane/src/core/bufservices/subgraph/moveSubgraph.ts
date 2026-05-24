@@ -9,8 +9,9 @@ import { FeatureFlagRepository } from '../../repositories/FeatureFlagRepository.
 import { NamespaceRepository } from '../../repositories/NamespaceRepository.js';
 import { SubgraphRepository } from '../../repositories/SubgraphRepository.js';
 import type { RouterOptions } from '../../routes.js';
-import { enrichLogger, getLogger, handleError, newCompositionOptions } from '../../util.js';
+import { enrichLogger, getLogger, handleError } from '../../util.js';
 import { OrganizationWebhookService } from '../../webhooks/OrganizationWebhookService.js';
+import { CompositionService } from '../../services/CompositionService.js';
 
 export function moveSubgraph(
   opts: RouterOptions,
@@ -30,6 +31,7 @@ export function moveSubgraph(
       authContext.organizationId,
       opts.logger,
       opts.billingDefaultPlanId,
+      opts.webhookProxyUrl,
     );
 
     const subgraph = await subgraphRepo.byName(req.name, req.namespace);
@@ -101,7 +103,18 @@ export function moveSubgraph(
           throw new PublicError(EnumStatusCode.ERR_NOT_FOUND, `Could not find namespace ${req.newNamespace}`);
         }
 
-        const { compositionErrors, updatedFederatedGraphs, deploymentErrors, compositionWarnings } =
+        const compositionService = new CompositionService(
+          tx,
+          authContext.organizationId,
+          logger,
+          { cdnBaseUrl: opts.cdnBaseUrl, webhookJWTSecret: opts.admissionWebhookJWTSecret },
+          opts.blobStorage,
+          opts.chClient,
+          opts.webhookProxyUrl,
+          req.disableResolvabilityValidation,
+        );
+
+        const { deploymentErrors, compositionErrors, compositionWarnings, updatedFederatedGraphs } =
           await subgraphRepo.move(
             {
               currentNamespaceId: subgraph.namespaceId,
@@ -111,13 +124,7 @@ export function moveSubgraph(
               targetId: subgraph.targetId,
               updatedBy: authContext.userId,
             },
-            opts.blobStorage,
-            {
-              cdnBaseUrl: opts.cdnBaseUrl,
-              jwtSecret: opts.admissionWebhookJWTSecret,
-            },
-            opts.chClient!,
-            newCompositionOptions(req.disableResolvabilityValidation),
+            compositionService,
           );
 
         await auditLogRepo.addAuditLog({

@@ -20,6 +20,8 @@ Rules should follow [Proto Best Practices](https://protobuf.dev/best-practices/d
 - ✓ Federation entity lookups with a single key
 - ✓ Federation entity lookups with multiple keys
 - ✓ Federation entity lookups with compound keys
+- ✓ Federation entity lookups on interface objects
+- ✓ Federation @requires directive (entity field dependencies)
 
 #### Data Types
 
@@ -42,7 +44,6 @@ Rules should follow [Proto Best Practices](https://protobuf.dev/best-practices/d
 #### Federation Features
 
 - ✗ Federation entity lookups with nested keys
-- ✗ @requires directive
 
 #### GraphQL Features
 
@@ -142,13 +143,370 @@ message LookupProductByIdResponse {
 }
 ```
 
+### Interface Object Lookups
+
+In addition to object types, interface types can also define `@key` directives, making them interface objects. When an interface has `@key`, a lookup method is generated for the interface itself, in addition to any lookups generated for the implementing types. The interface's proto message uses `oneof` (as with all interfaces), so the lookup response returns the interface wrapper which contains the concrete type.
+
+Both the interface and its implementing types can independently declare `@key` directives with different key fields:
+
+```graphql
+interface Account @key(fields: "id") {
+  id: ID!
+  email: String!
+}
+
+type PersonalAccount implements Account @key(fields: "id") @key(fields: "email") {
+  id: ID!
+  email: String!
+  name: String!
+}
+
+type BusinessAccount implements Account @key(fields: "id") {
+  id: ID!
+  email: String!
+  taxId: String!
+}
+```
+
+Maps to:
+
+```protobuf
+// Interface entity lookup
+rpc LookupAccountById(LookupAccountByIdRequest) returns (LookupAccountByIdResponse) {}
+
+// Implementing type lookups (each type has its own keys)
+rpc LookupPersonalAccountById(LookupPersonalAccountByIdRequest) returns (LookupPersonalAccountByIdResponse) {}
+rpc LookupPersonalAccountByEmail(LookupPersonalAccountByEmailRequest) returns (LookupPersonalAccountByEmailResponse) {}
+rpc LookupBusinessAccountById(LookupBusinessAccountByIdRequest) returns (LookupBusinessAccountByIdResponse) {}
+
+message LookupAccountByIdRequest {
+  repeated LookupAccountByIdRequestKey keys = 1;
+}
+
+message LookupAccountByIdRequestKey {
+  string id = 1;
+}
+
+message LookupAccountByIdResponse {
+  repeated Account result = 1;
+}
+
+message Account {
+  oneof instance {
+    PersonalAccount personal_account = 1;
+    BusinessAccount business_account = 2;
+  }
+}
+
+message PersonalAccount {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+}
+
+message BusinessAccount {
+  string id = 1;
+  string email = 2;
+  string tax_id = 3;
+}
+```
+
+**Key Points**:
+
+- The interface entity lookup returns the interface message (which contains `oneof instance`)
+- Implementing types generate their own independent lookup methods based on their own `@key` directives
+- `@requires` is **not** supported on interface objects — only on object types with `@key`
+
+### Required Fields (@requires)
+
+The `@requires` directive declares that a field depends on external fields from other subgraphs to be resolved. It is only supported on object types with `@key` (interfaces are excluded, even when declared as interface objects). For each field with `@requires`, a dedicated RPC method is generated that receives the entity key and the required external fields, and returns the computed field value.
+
+This directive is part of Apollo Federation and enables a service to compute fields that depend on data owned by other services, without those services needing to know about the computed field.
+
+#### Basic Required Fields
+
+For a simple `@requires` directive with scalar fields:
+
+```graphql
+type Product @key(fields: "id") {
+  id: ID!
+  price: Float! @external
+  itemCount: Int! @external
+  stockHealthScore: Float! @requires(fields: "itemCount price")
+}
+```
+
+Maps to:
+
+```protobuf
+rpc RequireProductStockHealthScoreById(RequireProductStockHealthScoreByIdRequest)
+    returns (RequireProductStockHealthScoreByIdResponse) {}
+
+message RequireProductStockHealthScoreByIdRequest {
+  // Context provides the context for the required fields method
+  repeated RequireProductStockHealthScoreByIdContext context = 1;
+}
+
+message RequireProductStockHealthScoreByIdContext {
+  // The key message is provided by the entity lookup generation and re-used.
+  LookupProductByIdRequestKey key = 1;
+  RequireProductStockHealthScoreByIdFields fields = 2;
+}
+
+message RequireProductStockHealthScoreByIdResponse {
+  // Result provides the result for the required fields method
+  repeated RequireProductStockHealthScoreByIdResult result = 1;
+}
+
+message RequireProductStockHealthScoreByIdResult {
+  double stock_health_score = 1;
+}
+
+message RequireProductStockHealthScoreByIdFields {
+  int32 item_count = 1;
+  double price = 2;
+}
+```
+
+**Naming Convention**: `Require{EntityType}{FieldName}By{KeyFields}`
+
+For the example above: `RequireProductStockHealthScoreById`
+
+- Entity type: `Product`
+- Field name: `StockHealthScore`
+- Key fields: `Id` (from the `@key` directive)
+
+#### Message Structure Breakdown
+
+Five messages are generated for each `@requires` field:
+
+1. **Request Message** (`Require...Request`): Wraps a repeated context for batch processing
+2. **Context Message** (`Require...Context`): Pairs the entity key with the required fields
+   - `key`: References the same key structure as the entity lookup (`Lookup...RequestKey`)
+   - `fields`: Contains the external fields specified in `@requires`
+3. **Fields Message** (`Require...Fields`): Contains only the fields from the `@requires` selection (converted to snake_case)
+4. **Response Message** (`Require...Response`): Wraps a repeated result for batch processing
+5. **Result Message** (`Require...Result`): Contains only the resolved field value (the one with `@requires`)
+
+The context message links the entity key (which identifies the entity) with the required external fields (which provide the data needed to compute the field).
+
+#### Nested Required Fields
+
+The `@requires` directive supports nested field selections for complex types:
+
+```graphql
+type Product @key(fields: "id") {
+  id: ID!
+  manufacturerId: ID! @external
+  details: ProductDetails! @external
+  name: String! @requires(fields: "manufacturerId details { description reviewSummary { status message } }")
+  price: Float!
+}
+
+type ProductDetails {
+  id: ID!
+  description: String!
+  title: String!
+  reviewSummary: ActionResult!
+}
+
+type ActionResult {
+  status: String!
+  message: String!
+}
+```
+
+Maps to:
+
+```protobuf
+rpc RequireProductNameById(RequireProductNameByIdRequest)
+    returns (RequireProductNameByIdResponse) {}
+
+message RequireProductNameByIdRequest {
+  repeated RequireProductNameByIdContext context = 1;
+}
+
+message RequireProductNameByIdContext {
+  LookupProductByIdRequestKey key = 1;
+  RequireProductNameByIdFields fields = 2;
+}
+
+message RequireProductNameByIdResponse {
+  repeated RequireProductNameByIdResult result = 1;
+}
+
+message RequireProductNameByIdResult {
+  string name = 1;
+}
+
+message RequireProductNameByIdFields {
+  message ProductDetails {
+    message ActionResult {
+      string status = 1;
+      string message = 2;
+    }
+
+    string description = 1;
+    ActionResult review_summary = 2;
+  }
+
+  string manufacturer_id = 1;
+  ProductDetails details = 2;
+}
+```
+
+**Key Points**:
+
+- The `Fields` message contains only the selected subset from the `@requires` directive, not the full types
+- Nested types are generated as nested proto messages within the `Fields` message
+- Only the selected fields from nested types are included (e.g., `description` and `reviewSummary` from `ProductDetails`, not `id` or `title`)
+- Field order in the proto matches the normalized selection order
+
+#### Composite Types in Required Fields (Interfaces & Unions)
+
+When `@requires` references a field whose type is an interface or union, the required field selection must include inline fragments to specify which fields to extract from each concrete type.
+
+##### The `__typename` Requirement
+
+When using inline fragments on an interface or union field in `@requires`, `__typename` must be present in the selection set. This is required for the engine to determine which concrete type to deserialize at runtime. Validation produces errors with field paths (e.g., `in "pet.friend"`) for nested selections missing `__typename`.
+
+Example:
+
+```graphql
+@requires(fields: "primaryItem { __typename ... on PalletItem { name } ... on ContainerItem { name } }")
+```
+
+##### Selection Normalization
+
+Before proto generation, selections are normalized by distributing parent-level fields into each inline fragment. For example:
+
+```graphql
+media { id ... on Book { author } ... on Movie { director } }
+```
+
+Normalizes to:
+
+```graphql
+media { ... on Book { id author } ... on Movie { id director } }
+```
+
+This ensures each fragment is self-contained. Nested inline fragments on sub-interfaces are also flattened to concrete types. For example, given `Employee` (interface) with implementors `Manager`, `Engineer`, `Contractor`, and `Intern` — where `Engineer` and `Contractor` also implement `Managed`:
+
+```graphql
+# Before normalization:
+members {
+  id
+  ... on Managed { supervisor }
+}
+
+# After normalization — expanded to all concrete types,
+# with `supervisor` only on types that implement Managed:
+members {
+  ... on Manager { id }
+  ... on Engineer { id supervisor }
+  ... on Contractor { id supervisor }
+  ... on Intern { id }
+}
+```
+
+##### Proto Mapping — Interface/Union Becomes `oneof`
+
+The interface or union type maps to a message with `oneof instance` containing each concrete type. `__typename` is consumed during validation only — it does **not** appear in the generated proto.
+
+```graphql
+type Storage @key(fields: "id") {
+  id: ID!
+  primaryItem: StorageItem! @external
+  itemInfo: String!
+    @requires(
+      fields: "primaryItem { __typename ... on PalletItem { name palletCount } ... on ContainerItem { name containerSize } }"
+    )
+}
+
+interface StorageItem {
+  name: String!
+}
+
+type PalletItem implements StorageItem {
+  name: String!
+  palletCount: Int!
+}
+
+type ContainerItem implements StorageItem {
+  name: String!
+  containerSize: String!
+}
+```
+
+Maps to (Fields message only):
+
+```protobuf
+message RequireStorageItemInfoByIdFields {
+  message PalletItem {
+    string name = 1;
+    int32 pallet_count = 2;
+  }
+
+  message ContainerItem {
+    string name = 1;
+    string container_size = 2;
+  }
+
+  message StorageItem {
+    oneof instance {
+      ContainerItem container_item = 1;
+      PalletItem pallet_item = 2;
+    }
+  }
+
+  StorageItem primary_item = 1;
+}
+```
+
+**Key Points**:
+
+- `__typename` is absent from the proto — it is consumed during validation only
+- The interface type becomes a message with `oneof instance`
+- Each implementing type gets its own message with only the fields selected in its fragment
+- All type messages (`StorageItem`, `PalletItem`, `ContainerItem`) are **nested inside** the `Fields` message. This scoping ensures they don't collide with the root-level messages of the same name, which contain all fields of the type — while the nested versions contain only the subset selected in `@requires`
+- The same pattern applies to union types (union member types instead of implementing types)
+
+#### Required Fields with Arguments
+
+When a field annotated with @requires defines arguments, it is handled the same as other @requires-annotated fields. However, the generated proto request message includes an additional field, field_args, which contains the argument values provided in the query.
+
+```graphql
+type User @key(fields: "id") {
+  id: ID!
+  post(slug: String!, maxResults: Int!): Post! @requires(fields: "name")
+}
+```
+
+Maps to:
+
+```protobuf
+rpc RequireUserPostById(RequireUserPostByIdRequest) returns (RequireUserPostByIdResponse) {}
+
+message RequireUserPostByIdRequest {
+  repeated RequireUserPostByIdContext context = 1;
+  RequireUserPostByIdArgs field_args = 2;  // Added when field has arguments
+}
+
+message RequireUserPostByIdArgs {
+  string slug = 1;
+  int32 max_results = 2;
+}
+```
+
 ## Field Resolvers
 
 Field resolvers allow you to define custom resolution logic for specific fields within a GraphQL type. Using the `@connect__fieldResolver` directive, you can specify which fields should be resolved through dedicated RPC methods, enabling lazy loading, computed fields, or integration with external data sources.
 
-### Basic Field Resolver
+Fields with the `@connect__fieldResolver` directive are excluded from the parent type's Proto message. This is the same behavior as fields with arguments, which are always treated as resolver fields. This ensures that expensive or lazily-loaded fields are not part of the regular response returned by operations — they are only resolved through their dedicated RPC methods.
 
-Fields marked with `@connect__fieldResolver` generate dedicated RPC methods with request and response messages:
+### Basic Field Resolver with Arguments
+
+Fields with arguments are automatically treated as resolver fields. Additionally, fields marked with `@connect__fieldResolver` generate dedicated RPC methods with request and response messages:
 
 ```graphql
 type User {
@@ -197,14 +555,61 @@ message ResolveUserPostsResponse {
 }
 ```
 
+### Field Resolver without Arguments
+
+The `@connect__fieldResolver` directive can also be used on fields **without arguments** to exclude expensive fields from the parent type's message and resolve them separately. In this case, no `Args` message is generated and the request message only contains the `context` field:
+
+```graphql
+type User {
+  id: ID!
+  name: String!
+  avatar: String! @connect__fieldResolver(context: "id")
+}
+
+type Query {
+  user(id: ID!): User
+}
+```
+
+Maps to:
+
+```protobuf
+rpc ResolveUserAvatar(ResolveUserAvatarRequest) returns (ResolveUserAvatarResponse) {}
+
+message ResolveUserAvatarContext {
+  string id = 1;
+}
+
+// Request message only includes context (no field_args)
+message ResolveUserAvatarRequest {
+  repeated ResolveUserAvatarContext context = 1;
+}
+
+message ResolveUserAvatarResult {
+  string avatar = 1;
+}
+
+message ResolveUserAvatarResponse {
+  repeated ResolveUserAvatarResult result = 1;
+}
+
+// Note: avatar is excluded from the User message
+message User {
+  string id = 1;
+  string name = 2;
+}
+```
+
 ### Field Resolver Components
 
-Each field resolver generates four message types:
+For field resolvers **with arguments**, four message types are generated:
 
 1. **Context Message** (`Resolve{Type}{Field}Context`): Contains fields from the parent type needed to resolve the field
 2. **Args Message** (`Resolve{Type}{Field}Args`): Contains the arguments passed to the field
 3. **Result Message** (`Resolve{Type}{Field}Result`): Contains the resolved field value
 4. **Request/Response Messages**: Standard request/response pattern for the RPC method
+
+For field resolvers **without arguments**, the `Args` message is omitted and the request message only contains the `context` field.
 
 ### Context Specification
 
@@ -236,20 +641,23 @@ If the `@connect__fieldResolver` directive is **not specified** on a field with 
 type User {
   id: ID!
   name: String!
-  posts(limit: Int!): [Post!]!  # No directive: automatically uses "id" as context
+  posts(limit: Int!): [Post!]! # No directive: automatically uses "id" as context
 }
 ```
 
 #### Context Validation Rules
 
 When the `@connect__fieldResolver` directive is specified:
+
 - The `context` parameter is **required** - you must explicitly specify which field(s) to use
 
 When the directive is NOT specified (automatic inference):
+
 - If no `ID` field exists, an error is raised
 - If multiple `ID` fields exist, an error is raised (you must use the directive with explicit context)
 
 In all cases:
+
 - Context fields are converted from camelCase to snake_case following Protocol Buffer naming conventions
 
 ### Field Name Conversion
@@ -276,6 +684,7 @@ message ResolveUserPostContext {
 ```
 
 This conversion applies to:
+
 - Context field names
 - Argument field names
 - Result field names
@@ -372,8 +781,8 @@ Field resolvers can return both scalar and list types:
 ```graphql
 type User {
   id: ID!
-  posts(limit: Int!): [Post!]!  # Returns list
-  activePost: Post               # Returns single item (nullable)
+  posts(limit: Int!): [Post!]! # Returns list
+  activePost: Post # Returns single item (nullable)
 }
 ```
 
@@ -389,7 +798,7 @@ message ResolveUserCommentsResult {
 
 ### Interfaces
 
-GraphQL interfaces are mapped to Protocol Buffer messages with a `oneof` field containing all implementing types:
+GraphQL interfaces are mapped to Protocol Buffer messages with a `oneof` field containing all implementing types. Interfaces can also define `@key` directives to become interface objects — see [Interface Object Lookups](#interface-object-lookups) for details.
 
 ```graphql
 interface Node {
@@ -478,6 +887,26 @@ enum UserRole {
 }
 ```
 
+If a GraphQL enum explicitly declares an `UNSPECIFIED` value, it is deduplicated into the auto-generated zero-position entry rather than producing a duplicate, regardless of order:
+
+```graphql
+enum State {
+  UNSPECIFIED
+  ACTIVE
+  INACTIVE
+}
+```
+
+Maps to:
+
+```protobuf
+enum State {
+  STATE_UNSPECIFIED = 0;
+  STATE_ACTIVE = 1;
+  STATE_INACTIVE = 2;
+}
+```
+
 ## List Types
 
 Protographic handles GraphQL list nullability by creating wrapper messages when needed, since Protocol Buffers doesn't natively support nullable lists or nested list structures.
@@ -485,11 +914,12 @@ Protographic handles GraphQL list nullability by creating wrapper messages when 
 ### Core Concepts
 
 - **Non-nullable single-level lists**: Use the `repeated` keyword directly
-- **Nullable lists**: Wrapped in `ListOf{Type}` messages 
+- **Nullable lists**: Wrapped in `ListOf{Type}` messages
 - **Nested lists**: Always use wrapper messages with multiple `ListOf` prefixes based on nesting level (e.g., `ListOfListOfString`)
 - **Nullable list items**: Currently ignored (no wrapper generated for item nullability)
 
 ### Non-Nullable Single Lists
+
 Non-nullable lists use `repeated` fields directly:
 
 ```graphql
@@ -593,9 +1023,6 @@ message User {
   ListOfListOfString posts = 1;
 }
 ```
-
-
-
 
 ## Field Numbering and Stability
 
@@ -702,14 +1129,14 @@ Protographic preserves documentation from GraphQL schemas and converts it to Pro
 
 ### Comment Conversion
 
-| GraphQL Documentation | Protocol Buffer Representation |
-| -------------------- | ------------------------------ |
-| Single-line descriptions (`"description"`) | Single-line comments (`// comment`) |
+| GraphQL Documentation                         | Protocol Buffer Representation        |
+| --------------------------------------------- | ------------------------------------- |
+| Single-line descriptions (`"description"`)    | Single-line comments (`// comment`)   |
 | Multi-line descriptions (`"""description"""`) | Multi-line comments (`/* comment */`) |
-| Field descriptions | Field comments |
-| Type descriptions | Message/enum comments |
-| Enum value descriptions | Enum value comments |
-| Operation descriptions | RPC method comments |
+| Field descriptions                            | Field comments                        |
+| Type descriptions                             | Message/enum comments                 |
+| Enum value descriptions                       | Enum value comments                   |
+| Operation descriptions                        | RPC method comments                   |
 
 ### Comment Preservation
 
@@ -727,3 +1154,5 @@ This approach ensures that documentation and business context from the GraphQL s
 ## Federation Support
 
 Types with Federation's `@key` directive generate dedicated lookup methods rather than using the `_entities` field approach used in pure GraphQL. The lookup methods are optimized for batch processing of entities.
+
+Additionally, fields marked with the `@requires` directive generate separate RPC methods that compute field values based on external dependencies. Each `@requires` field produces its own RPC method that receives the entity key along with the required external fields, enabling cross-subgraph field resolution. See [Required Fields (@requires)](#required-fields-requires) for detailed examples and message structure documentation.

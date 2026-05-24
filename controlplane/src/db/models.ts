@@ -2,7 +2,6 @@ import {
   billingPlans,
   billingSubscriptions,
   federatedGraphs,
-  lintRulesEnum,
   memberRoleEnum,
   organizationRoleEnum,
   organizationFeatures,
@@ -31,7 +30,6 @@ export type NewBillingSubscription = typeof billingSubscriptions.$inferInsert;
 export type NewBillingPlan = typeof billingPlans.$inferInsert;
 export type MemberRole = (typeof memberRoleEnum.enumValues)[number];
 export type OrganizationRole = (typeof organizationRoleEnum.enumValues)[number];
-export type LintRuleEnum = (typeof lintRulesEnum.enumValues)[number];
 export type GraphPruningRuleEnum = (typeof graphPruningRulesEnum.enumValues)[number];
 export type WebsocketSubprotocol = (typeof websocketSubprotocolEnum.enumValues)[number];
 export type CacheWarmupOperation = typeof cacheWarmerOperations.$inferInsert;
@@ -95,7 +93,8 @@ export type AuditLogAction =
   | 'added'
   | 'removed'
   | 'linked'
-  | 'unlinked';
+  | 'unlinked'
+  | 'recomposed';
 
 export type AuditLogFullAction =
   | 'namespace.created'
@@ -110,13 +109,15 @@ export type AuditLogFullAction =
   | 'graph_token.created'
   | 'graph_token.deleted'
   | 'monograph.created'
-  | 'monograph.updated'
   | 'monograph.deleted'
   | 'monograph.moved'
+  | 'monograph.recomposed'
+  | 'monograph.updated'
   | 'federated_graph.created'
   | 'federated_graph.deleted'
-  | 'federated_graph.updated'
   | 'federated_graph.moved'
+  | 'federated_graph.recomposed'
+  | 'federated_graph.updated'
   | 'subgraph.created'
   | 'subgraph.deleted'
   | 'subgraph.updated'
@@ -127,6 +128,7 @@ export type AuditLogFullAction =
   | 'feature_flag.deleted'
   | 'feature_flag.disabled'
   | 'feature_flag.enabled'
+  | 'feature_flag.recomposed'
   | 'feature_subgraph.created'
   | 'feature_subgraph.deleted'
   | 'feature_subgraph.published'

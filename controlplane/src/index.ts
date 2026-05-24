@@ -35,6 +35,7 @@ const {
   KC_ADMIN_USER,
   WEBHOOK_URL,
   WEBHOOK_SECRET,
+  WEBHOOK_PROXY_URL,
   GITHUB_APP_WEBHOOK_SECRET,
   GITHUB_APP_CLIENT_ID,
   GITHUB_APP_CLIENT_SECRET,
@@ -49,6 +50,13 @@ const {
   S3_SECRET_ACCESS_KEY,
   S3_FORCE_PATH_STYLE,
   S3_USE_INDIVIDUAL_DELETES,
+  S3_FAILOVER_STORAGE_URL,
+  S3_FAILOVER_ENDPOINT,
+  S3_FAILOVER_REGION,
+  S3_FAILOVER_ACCESS_KEY_ID,
+  S3_FAILOVER_SECRET_ACCESS_KEY,
+  S3_FAILOVER_FORCE_PATH_STYLE,
+  S3_FAILOVER_USE_INDIVIDUAL_DELETES,
   SMTP_ENABLED,
   SMTP_HOST,
   SMTP_PORT,
@@ -60,6 +68,7 @@ const {
   STRIPE_WEBHOOK_SECRET,
   DEFAULT_PLAN,
   OPENAI_API_KEY,
+  COMPOSITION_MAX_THREADS,
   REDIS_HOST,
   REDIS_PORT,
   REDIS_TLS_CA,
@@ -90,6 +99,9 @@ const options: BuildConfig = {
     enabled: true,
     level: LOG_LEVEL as pino.LevelWithSilent,
   },
+  composition: {
+    maxThreads: COMPOSITION_MAX_THREADS,
+  },
   openaiAPIKey: OPENAI_API_KEY,
   keycloak: {
     realm: KC_REALM,
@@ -110,6 +122,7 @@ const options: BuildConfig = {
   webhook: {
     url: WEBHOOK_URL,
     key: WEBHOOK_SECRET,
+    proxyUrl: WEBHOOK_PROXY_URL,
   },
   cdnBaseUrl: CDN_BASE_URL,
   admissionWebhook: {
@@ -136,6 +149,17 @@ const options: BuildConfig = {
     forcePathStyle: S3_FORCE_PATH_STYLE,
     useIndividualDeletes: S3_USE_INDIVIDUAL_DELETES,
   },
+  s3StorageFailover: S3_FAILOVER_STORAGE_URL
+    ? {
+        url: S3_FAILOVER_STORAGE_URL,
+        region: S3_FAILOVER_REGION,
+        endpoint: S3_FAILOVER_ENDPOINT,
+        username: S3_FAILOVER_ACCESS_KEY_ID,
+        password: S3_FAILOVER_SECRET_ACCESS_KEY,
+        forcePathStyle: S3_FAILOVER_FORCE_PATH_STYLE,
+        useIndividualDeletes: S3_FAILOVER_USE_INDIVIDUAL_DELETES,
+      }
+    : undefined,
   mailer: {
     smtpEnabled: SMTP_ENABLED,
     smtpHost: SMTP_HOST,

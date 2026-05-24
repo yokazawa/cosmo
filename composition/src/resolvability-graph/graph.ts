@@ -1,4 +1,4 @@
-import { Edge, EntityDataNode, GraphNode, GraphNodeOptions, RootNode } from './graph-nodes';
+import { Edge, EntityDataNode, GraphNode, type GraphNodeOptions, RootNode } from './graph-nodes';
 import {
   generateEntityResolvabilityErrors,
   generateRootResolvabilityErrors,
@@ -6,15 +6,30 @@ import {
   getMultipliedRelativeOriginPaths,
   newRootFieldData,
 } from './utils/utils';
-import { GraphFieldData, RootTypeName } from '../utils/types';
+import { type GraphFieldData, type RootTypeName } from '../utils/types';
 import { getFirstEntry, getOrThrowError, getValueOrDefault } from '../utils/utils';
-import { FieldName, NodeName, SelectionPath, SubgraphName, TypeName, ValidationResult } from './types/types';
-import { ConsolidateUnresolvablePathsParams, ValidateEntitiesParams, VisitEntityParams } from './types/params';
-import { NodeResolutionData } from './node-resolution-data/node-resolution-data';
+import {
+  type FieldName,
+  type NodeName,
+  type SelectionPath,
+  type SubgraphName,
+  type TypeName,
+  type ValidationResult,
+} from './types/types';
+import {
+  type ConsolidateUnresolvablePathsParams,
+  type ValidateEntitiesParams,
+  type VisitEntityParams,
+} from './types/params';
+import { type NodeResolutionData } from './node-resolution-data/node-resolution-data';
 import { LITERAL_PERIOD, NOT_APPLICABLE, ROOT_TYPE_NAMES } from './constants/string-constants';
 import { EntityWalker } from './walker/entity-walker/entity-walker';
 import { RootFieldWalker } from './walker/root-field-walkers/root-field-walker';
-import { EntityResolvabilityErrorsParams, EntitySharedRootFieldResolvabilityErrorsParams } from './utils/types/params';
+import {
+  type EntityResolvabilityErrorsParams,
+  type EntitySharedRootFieldResolvabilityErrorsParams,
+} from './utils/types/params';
+import { type EntityAncestorCollection } from './utils/types/types';
 
 export class Graph {
   edgeId = -1;
@@ -117,6 +132,10 @@ export class Graph {
       }
       node.hasEntitySiblings = true;
       for (const fieldSet of node.satisfiedFieldSets) {
+        // If the field set is unresolvable in the entity's own subgraph, it cannot be used to jump to other subgraphs.
+        if (node.externalFieldSets.has(fieldSet)) {
+          continue;
+        }
         const subgraphNames = entityDataNode.targetSubgraphNamesByFieldSet.get(fieldSet);
         for (const subgraphName of subgraphNames ?? []) {
           // A subgraph should not jump to itself
@@ -141,6 +160,7 @@ export class Graph {
     entityNodeName,
     relativeOriginPaths,
     resDataByRelativeOriginPath,
+    resolvedPaths,
     subgraphNameByUnresolvablePath,
     visitedEntities,
   }: VisitEntityParams) {
@@ -159,6 +179,7 @@ export class Graph {
       relativeOriginPaths,
       resDataByNodeName: this.resDataByNodeName,
       resDataByRelativeOriginPath,
+      resolvedPaths,
       subgraphNameByUnresolvablePath,
       visitedEntities,
     });
@@ -181,7 +202,7 @@ export class Graph {
     }
     // Because of shared entity descendant paths, we can only assess the errors after checking all nested entities.
     for (const [nestedEntityNodeName, selectionPath] of walker.selectionPathByEntityNodeName) {
-      /* Short circuiting on failures here can cause false positives.
+      /* Short-circuiting on failures here can cause false positives.
        * For example, an Object that is an entity at least one graph and defines at least one unique (nested) field.
        * If that Object has no accessible keys but is accessible through an ancestor, short-circuiting here would
        * produce an error before that shared path has been visited.
@@ -194,6 +215,7 @@ export class Graph {
           selectionPath: selectionPath,
         }),
         resDataByRelativeOriginPath,
+        resolvedPaths,
         subgraphNameByUnresolvablePath,
         visitedEntities,
       });
@@ -229,6 +251,7 @@ export class Graph {
         if (rootFieldWalker.unresolvablePaths.size < 1 && !involvesEntities) {
           continue;
         }
+
         const fieldData = getOrThrowError(rootNode.fieldDataByName, rootFieldName, 'fieldDataByName');
         const rootFieldData = newRootFieldData(rootNode.typeName, rootFieldName, fieldData.subgraphNames);
         // If there are no nested entities, then the unresolvable fields must be impossible to resolve.
@@ -242,12 +265,14 @@ export class Graph {
             success: false,
           };
         }
+
         const result = this.validateEntities({ isSharedRootField, rootFieldData, walker: rootFieldWalker });
         if (!result.success) {
           return result;
         }
       }
     }
+
     return {
       success: true,
     };
@@ -312,7 +337,13 @@ export class Graph {
   }
 
   validateSharedRootFieldEntities({ rootFieldData, walker }: ValidateEntitiesParams): ValidationResult {
+    const resolvedPaths = new Set<SelectionPath>();
     for (const [pathFromRoot, entityNodeNames] of walker.entityNodeNamesByPath) {
+      if (walker.unresolvablePaths.size < 1) {
+        return {
+          success: true,
+        };
+      }
       const subgraphNameByUnresolvablePath = new Map<SelectionPath, SubgraphName>();
       // Shared fields are unique contexts, so the resolution data cannot be reused.
       const resDataByRelativeOriginPath = new Map<SelectionPath, NodeResolutionData>();
@@ -324,6 +355,7 @@ export class Graph {
           encounteredEntityNodeNames: new Set<NodeName>(),
           entityNodeName,
           resDataByRelativeOriginPath: resDataByRelativeOriginPath,
+          resolvedPaths,
           subgraphNameByUnresolvablePath,
           visitedEntities: new Set<NodeName>(),
         });
@@ -337,44 +369,37 @@ export class Graph {
         subgraphNameByUnresolvablePath,
         walker,
       });
+
+      // Check nothing further needs to be done
       if (subgraphNameByUnresolvablePath.size < 1) {
         continue;
       }
+
+      // Only do this if we have to
       this.consolidateUnresolvableEntityWithRootPaths({
         pathFromRoot,
         resDataByRelativeOriginPath,
         subgraphNameByUnresolvablePath,
         walker,
       });
-      const errors = new Array<Error>();
-      if (subgraphNameByUnresolvablePath.size > 0) {
-        errors.push(
-          ...this.getSharedEntityResolvabilityErrors({
-            entityNodeNames,
-            resDataByPath: resDataByRelativeOriginPath,
-            pathFromRoot,
-            rootFieldData,
-            subgraphNameByUnresolvablePath,
-          }),
-        );
-      }
-      if (walker.unresolvablePaths.size > 0) {
-        errors.push(
-          ...generateRootResolvabilityErrors({
-            unresolvablePaths: walker.unresolvablePaths,
-            resDataByPath: walker.resDataByPath,
-            rootFieldData,
-          }),
-        );
-      }
-      if (errors.length < 1) {
+
+      // Check again before returning an error
+      if (subgraphNameByUnresolvablePath.size < 1) {
         continue;
       }
+
       return {
-        errors,
+        errors: generateSharedEntityResolvabilityErrors({
+          entityAncestors: this.getEntityAncestorCollection(entityNodeNames),
+          pathFromRoot,
+          resDataByPath: resDataByRelativeOriginPath,
+          rootFieldData: rootFieldData,
+          subgraphNameByUnresolvablePath,
+        }),
         success: false,
       };
     }
+
     if (walker.unresolvablePaths.size > 0) {
       return {
         errors: generateRootResolvabilityErrors({
@@ -385,12 +410,14 @@ export class Graph {
         success: false,
       };
     }
+
     return {
       success: true,
     };
   }
 
   validateRootFieldEntities({ rootFieldData, walker }: ValidateEntitiesParams): ValidationResult {
+    const resolvedPaths = new Set<SelectionPath>();
     for (const [entityNodeName, entityPaths] of walker.pathsByEntityNodeName) {
       const subgraphNameByUnresolvablePath = new Map<SelectionPath, SubgraphName>();
       if (this.resDataByNodeName.has(entityNodeName)) {
@@ -405,6 +432,7 @@ export class Graph {
         encounteredEntityNodeNames: new Set<NodeName>(),
         entityNodeName,
         resDataByRelativeOriginPath: resDataByRelativeOriginPath,
+        resolvedPaths,
         subgraphNameByUnresolvablePath,
         visitedEntities: getValueOrDefault(
           this.visitedEntitiesByOriginEntity,
@@ -416,6 +444,7 @@ export class Graph {
       if (subgraphNameByUnresolvablePath.size < 1) {
         continue;
       }
+
       return {
         errors: this.getEntityResolvabilityErrors({
           entityNodeName,
@@ -427,6 +456,7 @@ export class Graph {
         success: false,
       };
     }
+
     return {
       success: true,
     };
@@ -469,35 +499,32 @@ export class Graph {
     });
   }
 
-  getSharedEntityResolvabilityErrors({
-    entityNodeNames,
-    pathFromRoot,
-    rootFieldData,
-    resDataByPath,
-    subgraphNameByUnresolvablePath,
-  }: EntitySharedRootFieldResolvabilityErrorsParams): Array<Error> {
-    let entityTypeName: string | undefined = undefined;
-    const subgraphNames = new Array<SubgraphName>();
-    for (const entityNodeName of entityNodeNames) {
-      const segments = entityNodeName.split(LITERAL_PERIOD);
-      entityTypeName ??= segments[1];
-      subgraphNames.push(segments[0]);
-    }
+  getEntityAncestorCollection(entityNodeNames: Set<NodeName>): EntityAncestorCollection {
+    const typeName = getFirstEntry(entityNodeNames)!.split(LITERAL_PERIOD)[1];
     const { fieldSetsByTargetSubgraphName } = getOrThrowError(
       this.entityDataNodeByTypeName,
-      entityTypeName,
+      typeName,
       'entityDataNodeByTypeName',
     );
-    return generateSharedEntityResolvabilityErrors({
-      entityAncestors: {
-        fieldSetsByTargetSubgraphName,
-        subgraphNames,
-        typeName: entityTypeName!,
-      },
-      pathFromRoot,
-      resDataByPath,
-      rootFieldData: rootFieldData,
-      subgraphNameByUnresolvablePath,
-    });
+    const subgraphNames = new Array<SubgraphName>();
+    const sourceSubgraphNamesBySatisfiedFieldSet = new Map<string, Array<SubgraphName>>();
+    for (const entityNodeName of entityNodeNames) {
+      const { satisfiedFieldSets, subgraphName } = getOrThrowError(
+        this.nodeByNodeName,
+        entityNodeName,
+        'nodeByNodeName',
+      );
+      for (const fieldSet of satisfiedFieldSets) {
+        getValueOrDefault(sourceSubgraphNamesBySatisfiedFieldSet, fieldSet, () => []).push(subgraphName);
+      }
+      subgraphNames.push(subgraphName);
+    }
+
+    return {
+      fieldSetsByTargetSubgraphName,
+      sourceSubgraphNamesBySatisfiedFieldSet,
+      subgraphNames,
+      typeName,
+    };
   }
 }

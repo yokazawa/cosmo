@@ -3,9 +3,11 @@ import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../../db/schema.js';
 import { NamespaceDTO } from '../../types/index.js';
 import { RBACEvaluator } from '../services/RBACEvaluator.js';
+import { traced } from '../tracing.js';
 
 export const DefaultNamespace = 'default';
 
+@traced
 export class NamespaceRepository {
   constructor(
     private db: PostgresJsDatabase<typeof schema>,
@@ -34,6 +36,7 @@ export class NamespaceRepository {
       enableCacheWarmer: namespace.namespaceConfig?.enableCacheWarming ?? false,
       checksTimeframeInDays: namespace.namespaceConfig?.checksTimeframeInDays || undefined,
       enableProposals: namespace.namespaceConfig?.enableProposals ?? false,
+      enableSubgraphCheckExtensions: namespace.namespaceConfig?.enableSubgraphCheckExtensions ?? false,
     };
   }
 
@@ -59,6 +62,7 @@ export class NamespaceRepository {
       enableCacheWarmer: namespace.namespaceConfig?.enableCacheWarming ?? false,
       checksTimeframeInDays: namespace.namespaceConfig?.checksTimeframeInDays || undefined,
       enableProposals: namespace.namespaceConfig?.enableProposals ?? false,
+      enableSubgraphCheckExtensions: namespace.namespaceConfig?.enableSubgraphCheckExtensions ?? false,
     };
   }
 
@@ -166,6 +170,7 @@ export class NamespaceRepository {
     enableCacheWarming?: boolean;
     checksTimeframeInDays?: number;
     enableProposals?: boolean;
+    enableSubgraphCheckExtensions?: boolean;
   }) {
     const values = {
       namespaceId: data.id,
@@ -174,6 +179,7 @@ export class NamespaceRepository {
       enableCacheWarming: data.enableCacheWarming,
       checksTimeframeInDays: data.checksTimeframeInDays,
       enableProposals: data.enableProposals,
+      enableSubgraphCheckExtensions: data.enableSubgraphCheckExtensions,
     };
 
     await this.db.insert(schema.namespaceConfig).values(values).onConflictDoUpdate({

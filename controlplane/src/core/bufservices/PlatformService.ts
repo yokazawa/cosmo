@@ -45,8 +45,11 @@ import { enableFeatureFlag } from './feature-flag/enableFeatureFlag.js';
 import { getFeatureFlagByName } from './feature-flag/getFeatureFlagByName.js';
 import { getFeatureFlags } from './feature-flag/getFeatureFlags.js';
 import { getFeatureFlagsByFederatedGraph } from './feature-flag/getFeatureFlagsByFederatedGraph.js';
+import { getFeatureFlagsInLatestCompositionByFederatedGraph } from './feature-flag/getFeatureFlagsInLatestCompositionByFederatedGraph.js';
 import { getFeatureSubgraphs } from './feature-flag/getFeatureSubgraphs.js';
+import { getFeatureSubgraphsByFederatedGraph } from './feature-flag/getFeatureSubgraphsByFederatedGraph.js';
 import { getFeatureSubgraphsByFeatureFlag } from './feature-flag/getFeatureSubgraphsByFeatureFlag.js';
+import { recomposeFeatureFlag } from './feature-flag/recomposeFeatureFlag.js';
 import { updateFeatureFlag } from './feature-flag/updateFeatureFlag.js';
 import { checkFederatedGraph } from './federated-graph/checkFederatedGraph.js';
 import { createFederatedGraph } from './federated-graph/createFederatedGraph.js';
@@ -81,6 +84,9 @@ import { migrateMonograph } from './monograph/migrateMonograph.js';
 import { moveMonograph } from './monograph/moveMonograph.js';
 import { publishMonograph } from './monograph/publishMonograph.js';
 import { updateMonograph } from './monograph/updateMonograph.js';
+import { createOnboarding } from './onboarding/createOnboarding.js';
+import { finishOnboarding } from './onboarding/finishOnboarding.js';
+import { getOnboarding } from './onboarding/getOnboarding.js';
 import { createNamespace } from './namespace/createNamespace.js';
 import { deleteNamespace } from './namespace/deleteNamespace.js';
 import { getNamespace } from './namespace/getNamespace.js';
@@ -117,6 +123,8 @@ import { whoAmI } from './organization/whoAmI.js';
 import { getClients } from './persisted-operation/getClients.js';
 import { getPersistedOperations } from './persisted-operation/getPersistedOperations.js';
 import { publishPersistedOperations } from './persisted-operation/publishPersistedOperations.js';
+import { deletePersistedOperation } from './persisted-operation/deletePersistedOperation.js';
+import { checkPersistedOperationTraffic } from './persisted-operation/check-persisted-operation-traffic.js';
 import { createPlaygroundScript } from './playground/createPlaygroundScript.js';
 import { deletePlaygroundScript } from './playground/deletePlaygroundScript.js';
 import { getPlaygroundScripts } from './playground/getPlaygroundScripts.js';
@@ -148,6 +156,7 @@ import { getInvitations } from './user/getInvitations.js';
 import { getUserAccessiblePermissions } from './user/getUserAccessiblePermissions.js';
 import { getUserAccessibleResources } from './user/getUserAccessibleResources.js';
 import { inviteUser } from './user/inviteUser.js';
+import { inviteUsers } from './user/inviteUsers.js';
 import { removeInvitation } from './user/removeInvitation.js';
 import { removeOrganizationMember } from './user/removeOrganizationMember.js';
 import { updateOrgMemberGroup } from './user/updateOrgMemberGroup.js';
@@ -172,6 +181,11 @@ import { linkSubgraph } from './subgraph/linkSubgraph.js';
 import { unlinkSubgraph } from './subgraph/unlinkSubgraph.js';
 import { getWorkspace } from './workspace/getWorkspace.js';
 import { verifyAPIKeyGraphAccess } from './api-key/verifyAPIKeyGraphAccess.js';
+import { getSubgraphCheckExtensionsConfig } from './check-extensions/getSubgraphCheckExtensionsConfig.js';
+import { configureSubgraphCheckExtensions } from './check-extensions/configureSubgraphCheckExtensions.js';
+import { initializeCosmoUser } from './user/initializeCosmoUser.js';
+import { listOrganizations } from './organization/listOrganizations.js';
+import { recomposeGraph } from './graph/recomposeGraph.js';
 
 export default function (opts: RouterOptions): Partial<ServiceImpl<typeof PlatformService>> {
   return {
@@ -339,6 +353,10 @@ export default function (opts: RouterOptions): Partial<ServiceImpl<typeof Platfo
       return inviteUser(opts, req, ctx);
     },
 
+    inviteUsers: (req, ctx) => {
+      return inviteUsers(opts, req, ctx);
+    },
+
     createAPIKey: (req, ctx) => {
       return createAPIKey(opts, req, ctx);
     },
@@ -423,6 +441,14 @@ export default function (opts: RouterOptions): Partial<ServiceImpl<typeof Platfo
       return publishPersistedOperations(opts, req, ctx);
     },
 
+    checkPersistedOperationTraffic: (req, ctx) => {
+      return checkPersistedOperationTraffic(opts, req, ctx);
+    },
+
+    deletePersistedOperation: (req, ctx) => {
+      return deletePersistedOperation(opts, req, ctx);
+    },
+
     acceptOrDeclineInvitation: (req, ctx) => {
       return acceptOrDeclineInvitation(opts, req, ctx);
     },
@@ -474,12 +500,20 @@ export default function (opts: RouterOptions): Partial<ServiceImpl<typeof Platfo
       return getSubgraphByName(opts, req, ctx);
     },
 
+    initializeCosmoUser: (req, ctx) => {
+      return initializeCosmoUser(opts, req, ctx);
+    },
+
     getFederatedGraphs: (req, ctx) => {
       return getFederatedGraphs(opts, req, ctx);
     },
 
     getFederatedGraphsBySubgraphLabels: (req, ctx) => {
       return getFederatedGraphsBySubgraphLabels(opts, req, ctx);
+    },
+
+    listOrganizations: (req, ctx) => {
+      return listOrganizations(opts, req, ctx);
     },
 
     getFederatedGraphSDLByName: (req, ctx) => {
@@ -732,6 +766,14 @@ export default function (opts: RouterOptions): Partial<ServiceImpl<typeof Platfo
       return getFeatureFlagsByFederatedGraph(opts, req, ctx);
     },
 
+    getFeatureFlagsInLatestCompositionByFederatedGraph: (req, ctx) => {
+      return getFeatureFlagsInLatestCompositionByFederatedGraph(opts, req, ctx);
+    },
+
+    getFeatureSubgraphsByFederatedGraph: (req, ctx) => {
+      return getFeatureSubgraphsByFederatedGraph(opts, req, ctx);
+    },
+
     getOrganizationWebhookHistory: (req, ctx) => {
       return getOrganizationWebhookHistory(opts, req, ctx);
     },
@@ -778,6 +820,16 @@ export default function (opts: RouterOptions): Partial<ServiceImpl<typeof Platfo
 
     getCacheWarmerConfig: (req, ctx) => {
       return getCacheWarmerConfig(opts, req, ctx);
+    },
+
+    // subgraph check extensions
+
+    getSubgraphCheckExtensionsConfig: (req, ctx) => {
+      return getSubgraphCheckExtensionsConfig(opts, req, ctx);
+    },
+
+    configureSubgraphCheckExtensions: (req, ctx) => {
+      return configureSubgraphCheckExtensions(opts, req, ctx);
     },
 
     // apis used by the terraform provider
@@ -868,6 +920,26 @@ export default function (opts: RouterOptions): Partial<ServiceImpl<typeof Platfo
 
     verifyAPIKeyGraphAccess: (req, ctx) => {
       return verifyAPIKeyGraphAccess(opts, req, ctx);
+    },
+
+    recomposeGraph: (req, ctx) => {
+      return recomposeGraph(opts, req, ctx);
+    },
+
+    recomposeFeatureFlag: (req, ctx) => {
+      return recomposeFeatureFlag(opts, req, ctx);
+    },
+
+    getOnboarding: (req, ctx) => {
+      return getOnboarding(opts, req, ctx);
+    },
+
+    createOnboarding: (req, ctx) => {
+      return createOnboarding(opts, req, ctx);
+    },
+
+    finishOnboarding: (req, ctx) => {
+      return finishOnboarding(opts, req, ctx);
     },
   };
 }

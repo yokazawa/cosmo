@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   allExternalFieldInstancesError,
-  ConfigurationData,
+  type ConfigurationData,
   DEFAULT_EDFS_PROVIDER_ID,
   duplicateDirectiveArgumentDefinitionsErrorMessage,
   EDFS_NATS_PUBLISH,
@@ -18,7 +18,6 @@ import {
   invalidKeyFieldSetsEventDrivenErrorMessage,
   invalidNatsStreamConfigurationDefinitionErrorMessage,
   invalidNatsStreamInputFieldsErrorMessage,
-  InvalidRootTypeFieldEventsDirectiveData,
   invalidRootTypeFieldEventsDirectivesErrorMessage,
   invalidRootTypeFieldResponseTypesEventDrivenErrorMessage,
   noBaseDefinitionForExtensionError,
@@ -31,10 +30,10 @@ import {
   PROVIDER_TYPE_NATS,
   PROVIDER_TYPE_REDIS,
   ROUTER_COMPATIBILITY_VERSION_ONE,
-  Subgraph,
+  type Subgraph,
   subgraphValidationError,
   SUBJECTS,
-  TypeName,
+  type TypeName,
   undefinedEventSubjectsArgumentErrorMessage,
   undefinedRequiredArgumentsErrorMessage,
   unexpectedDirectiveArgumentErrorMessage,
@@ -60,6 +59,7 @@ import {
   normalizeSubgraphSuccess,
   schemaToSortedNormalizedString,
 } from '../utils/utils';
+import { type InvalidRootTypeFieldEventsDirectiveData } from '../../src/errors/types/types';
 
 describe('events Configuration tests', () => {
   describe('Normalization tests', () => {

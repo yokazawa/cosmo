@@ -49,7 +49,11 @@
       ],
       "OperationContentAttributes": false,
       "ExportGraphQLVariables": true,
-      "WithNewRoot": false
+      "WithNewRoot": false,
+      "SanitizeUTF8": {
+        "Enabled": false,
+        "LogSanitizations": false
+      }
     },
     "Metrics": {
       "Attributes": null,
@@ -60,6 +64,10 @@
         "ConnectionStats": true,
         "EngineStats": {
           "Subscriptions": true
+        },
+        "CostStats": {
+          "EstimatedEnabled": false,
+          "ActualEnabled": false
         },
         "CircuitBreaker": false,
         "Streams": false,
@@ -74,7 +82,15 @@
             "Headers": {},
             "Temporality": ""
           }
-        ]
+        ],
+        "LogExporter": {
+          "Enabled": true,
+          "ExcludeMetrics": [
+            "process\\.",
+            "server\\.uptime"
+          ],
+          "IncludeMetrics": null
+        }
       },
       "Prometheus": {
         "Enabled": true,
@@ -86,6 +102,10 @@
         "EngineStats": {
           "Subscriptions": true
         },
+        "CostStats": {
+          "EstimatedEnabled": false,
+          "ActualEnabled": false
+        },
         "CircuitBreaker": false,
         "ExcludeMetrics": null,
         "ExcludeMetricLabels": null,
@@ -93,7 +113,12 @@
         "SchemaFieldUsage": {
           "Enabled": true,
           "IncludeOperationSha": true,
-          "SampleRate": 1
+          "Exporter": {
+            "BatchSize": 4096,
+            "QueueSize": 12800,
+            "Interval": 2000000000,
+            "ExportTimeout": 10000000000
+          }
         }
       },
       "CardinalityLimit": 2000
@@ -139,6 +164,22 @@
         "CertFile": "",
         "Required": false
       }
+    },
+    "Client": {
+      "All": {
+        "CertFile": "/path/to/client.crt",
+        "KeyFile": "/path/to/client.key",
+        "CaFile": "/path/to/ca.crt",
+        "InsecureSkipCaVerification": false
+      },
+      "Subgraphs": {
+        "products": {
+          "CertFile": "/path/to/products-client.crt",
+          "KeyFile": "/path/to/products-client.key",
+          "CaFile": "/path/to/products-ca.crt",
+          "InsecureSkipCaVerification": false
+        }
+      }
     }
   },
   "CacheControl": {
@@ -167,7 +208,35 @@
     "ExcludeMutations": false,
     "EnableArbitraryOperations": false,
     "ExposeSchema": false,
-    "RouterURL": "https://cosmo-router.wundergraph.com"
+    "RouterURL": "https://cosmo-router.wundergraph.com",
+    "OmitToolNamePrefix": false,
+    "OAuth": {
+      "Enabled": false,
+      "JWKS": null,
+      "AuthorizationServerURL": "",
+      "Scopes": {
+        "Initialize": null,
+        "ToolsList": null,
+        "ToolsCall": null,
+        "ExecuteGraphQL": null,
+        "GetOperationInfo": null,
+        "GetSchema": null
+      },
+      "ScopeChallengeIncludeTokenScopes": false,
+      "MaxScopeCombinations": 2048
+    },
+    "ResourceDocumentation": ""
+  },
+  "ConnectRPC": {
+    "Enabled": false,
+    "Server": {
+      "ListenAddr": "localhost:5026",
+      "BaseURL": ""
+    },
+    "Storage": {
+      "ProviderID": ""
+    },
+    "GraphQLEndpoint": ""
   },
   "DemoMode": true,
   "Modules": {
@@ -304,7 +373,19 @@
     "CookieWhitelist": [
       "cookie1",
       "cookie2"
-    ]
+    ],
+    "Router": {
+      "Response": [
+        {
+          "Name": "X-Client-Version",
+          "Expression": "request.header.Get('User-Agent')"
+        },
+        {
+          "Name": "X-Request-ID",
+          "Expression": "request.header.Get('X-Request-ID') ?? 'default-request-id'"
+        }
+      ]
+    }
   },
   "TrafficShaping": {
     "All": {
@@ -470,6 +551,7 @@
   "QueryPlansEnabled": true,
   "LogLevel": "info",
   "JSONLog": true,
+  "LogServiceName": "my-custom-router",
   "ShutdownDelay": 15000000000,
   "GracePeriod": 20000000000,
   "PollInterval": 10000000000,
@@ -484,6 +566,7 @@
       "JWKS": [
         {
           "URL": "https://example.com/.well-known/jwks.json",
+          "AllowedUse": null,
           "Algorithms": [
             "RS256"
           ],
@@ -501,6 +584,7 @@
         },
         {
           "URL": "https://example.com/.well-known/jwks2.json",
+          "AllowedUse": null,
           "Algorithms": [
             "RS256",
             "ES256"
@@ -519,6 +603,7 @@
         },
         {
           "URL": "https://example.com/.well-known/jwks3.json",
+          "AllowedUse": null,
           "Algorithms": null,
           "RefreshInterval": 0,
           "RefreshUnknownKID": {
@@ -533,6 +618,7 @@
           "Audiences": null
         }
       ],
+      "ScopeClaim": "customscp",
       "HeaderName": "Authorization",
       "HeaderValuePrefix": "Bearer",
       "HeaderSources": [
@@ -566,7 +652,15 @@
       "Period": 60000000000,
       "RejectExceedingRequests": true,
       "RejectStatusCode": 200,
-      "HideStatsFromResponseExtension": false
+      "HideStatsFromResponseExtension": false,
+      "Overrides": [
+        {
+          "Matching": "^premium-.*",
+          "Rate": 200,
+          "Burst": 200,
+          "Period": 60000000000
+        }
+      ]
     },
     "Storage": {
       "URLs": [
@@ -595,7 +689,9 @@
         {
           "ID": "default",
           "URL": "nats://localhost:4222",
-          "Authentication": null
+          "Authentication": null,
+          "TLS": null,
+          "DeleteDurableConsumersOnShutdown": false
         },
         {
           "ID": "my-nats",
@@ -606,7 +702,9 @@
               "Username": "admin"
             },
             "Token": null
-          }
+          },
+          "TLS": null,
+          "DeleteDurableConsumersOnShutdown": false
         }
       ],
       "Kafka": [
@@ -652,11 +750,15 @@
   "CacheWarmup": {
     "Enabled": false,
     "Source": {
-      "Filesystem": null
+      "Filesystem": null,
+      "CdnSource": {
+        "Enabled": true
+      }
     },
     "Workers": 8,
     "ItemsPerSecond": 50,
-    "Timeout": 30000000000
+    "Timeout": 30000000000,
+    "InMemoryFallback": true
   },
   "RouterConfigPath": "latest.json",
   "RouterRegistration": true,
@@ -697,6 +799,7 @@
       "CacheSize": 1024
     },
     "ComplexityLimits": {
+      "Mode": "enforce",
       "Depth": {
         "Enabled": true,
         "Limit": 5,
@@ -718,6 +821,13 @@
         "IgnorePersistedOperations": true
       },
       "IgnoreIntrospection": false
+    },
+    "CostControl": {
+      "Enabled": true,
+      "Mode": "enforce",
+      "MaxEstimatedLimit": 1000,
+      "EstimatedListSize": 10,
+      "ExposeHeaders": false
     },
     "DepthLimit": null,
     "ParserLimits": {
@@ -742,22 +852,22 @@
       "EnableResolverDebugging": false,
       "EnablePersistedOperationsCacheResponseHeader": false,
       "EnableNormalizationCacheResponseHeader": false,
+      "EnableCacheResponseHeaders": false,
       "AlwaysIncludeQueryPlan": false,
       "AlwaysSkipLoader": false
     },
     "EnableSingleFlight": true,
+    "ForceEnableSingleFlight": false,
+    "EnableInboundRequestDeduplication": true,
+    "ForceEnableInboundRequestDeduplication": false,
     "EnableRequestTracing": true,
+    "ForceUnauthenticatedRequestTracing": false,
     "EnableExecutionPlanCacheResponseHeader": false,
     "MaxConcurrentResolvers": 32,
     "EnableNetPoll": true,
-    "WebSocketClientPollTimeout": 1000000000,
-    "WebSocketClientConnBufferSize": 128,
-    "WebSocketClientReadTimeout": 5000000000,
-    "WebSocketClientWriteTimeout": 10000000000,
-    "WebSocketClientPingInterval": 10000000000,
-    "WebSocketClientPingTimeout": 30000000000,
-    "WebSocketClientFrameTimeout": 100000000,
     "ExecutionPlanCacheSize": 1024,
+    "SlowPlanCacheSize": 300,
+    "SlowPlanCacheThreshold": 100000000,
     "MinifySubgraphOperations": true,
     "EnablePersistedOperationsCache": true,
     "EnableNormalizationCache": true,
@@ -772,7 +882,17 @@
     "DisableVariablesRemapping": false,
     "EnableRequireFetchReasons": false,
     "SubscriptionFetchTimeout": 30000000000,
-    "ValidateRequiredExternalFields": false
+    "WebSocketServerReadTimeout": 5000000000,
+    "WebSocketServerWriteTimeout": 10000000000,
+    "WebSocketServerPollTimeout": 1000000000,
+    "WebSocketServerConnBufferSize": 128,
+    "WebSocketClientWriteTimeout": 10000000000,
+    "WebSocketClientReadLimit": 1000000,
+    "WebSocketClientPingInterval": 10000000000,
+    "WebSocketClientPingTimeout": 30000000000,
+    "WebSocketClientAckTimeout": 30000000000,
+    "ValidateRequiredExternalFields": false,
+    "RelaxSubgraphOperationFieldSelectionMergingNullability": false
   },
   "WebSocket": {
     "Enabled": true,
@@ -830,6 +950,14 @@
     ],
     "AllowedFields": null
   },
+  "SubgraphExtensionPropagation": {
+    "Enabled": true,
+    "AllowedExtensionFields": [
+      "rateLimit",
+      "auth"
+    ],
+    "Algorithm": "last_write"
+  },
   "StorageProviders": {
     "S3": [
       {
@@ -876,6 +1004,13 @@
       "ObjectPath": ""
     }
   },
+  "SplitConfigPoller": {
+    "SkipMissingFeatureFlags": true,
+    "IgnoredFeatureFlags": [
+      "experimental-checkout",
+      "ab-test-foo"
+    ]
+  },
   "PersistedOperationsConfig": {
     "Disabled": false,
     "LogUnknown": true,
@@ -888,6 +1023,18 @@
     "Storage": {
       "ProviderID": "s3",
       "ObjectPrefix": "5ef73d80-cae4-4d0e-98a7-1e9fa922c1a4/92c25b45-a75b-4954-b8f6-6592a9b203eb/operations/foo"
+    },
+    "Manifest": {
+      "Enabled": true,
+      "FileName": "manifest.json",
+      "PollInterval": 30000000000,
+      "PollJitter": 10000000000,
+      "Warmup": {
+        "Enabled": true,
+        "Workers": 4,
+        "ItemsPerSecond": 50,
+        "Timeout": 30000000000
+      }
     }
   },
   "AutomaticPersistedQueries": {
@@ -944,7 +1091,8 @@
     "Enabled": true,
     "Path": "some/path/to/plugins",
     "Registry": {
-      "URL": "cosmo-registry.wundergraph.com"
+      "URL": "cosmo-registry.wundergraph.com",
+      "Insecure": false
     }
   },
   "WatchConfig": {

@@ -41,7 +41,7 @@ func newRouter(ctx context.Context, params RouterResources, additionalOptions ..
 		// More details: https://tip.golang.org/doc/gc-guide#Memory_limit
 		mLimit, err := memlimit.SetGoMemLimitWithOpts(
 			memlimit.WithRatio(0.9),
-			memlimit.WithProvider(memlimit.FromCgroupHybrid),
+			memlimit.WithProvider(memlimit.FromCgroup),
 		)
 		if err == nil {
 			params.Logger.Info("GOMEMLIMIT set automatically", zap.String("limit", humanize.Bytes(uint64(mLimit))))
@@ -50,7 +50,7 @@ func newRouter(ctx context.Context, params RouterResources, additionalOptions ..
 		}
 	}
 
-	options := optionsFromResources(logger, cfg)
+	options := optionsFromResources(logger, cfg, params.ReloadPersistentState)
 	options = append(options, additionalOptions...)
 
 	authenticators, err := setupAuthenticators(ctx, logger, cfg)
@@ -64,6 +64,7 @@ func newRouter(ctx context.Context, params RouterResources, additionalOptions ..
 			AuthenticationRequired:   cfg.Authorization.RequireAuthentication,
 			SkipIntrospectionQueries: cfg.Authentication.IgnoreIntrospection,
 			IntrospectionSkipSecret:  cfg.IntrospectionConfig.Secret,
+			ScopeClaim:               cfg.Authentication.JWT.ScopeClaim,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("could not create access controller: %w", err)
@@ -171,17 +172,18 @@ func newRouter(ctx context.Context, params RouterResources, additionalOptions ..
 		}))
 	} else {
 		options = append(options, WithConfigPollerConfig(&RouterConfigPollerConfig{
-			GraphSignKey:    cfg.Graph.SignKey,
-			PollInterval:    cfg.PollInterval,
-			PollJitter:      cfg.PollJitter,
-			ExecutionConfig: cfg.ExecutionConfig,
+			GraphSignKey:      cfg.Graph.SignKey,
+			PollInterval:      cfg.PollInterval,
+			PollJitter:        cfg.PollJitter,
+			ExecutionConfig:   cfg.ExecutionConfig,
+			SplitConfigPoller: cfg.SplitConfigPoller,
 		}))
 	}
 
 	return NewRouter(options...)
 }
 
-func optionsFromResources(logger *zap.Logger, config *config.Config) []Option {
+func optionsFromResources(logger *zap.Logger, config *config.Config, reloadPersistentState *ReloadPersistentState) []Option {
 	options := []Option{
 		WithListenerAddr(config.ListenAddr),
 		WithOverrideRoutingURL(config.OverrideRoutingURL),
@@ -242,15 +244,7 @@ func optionsFromResources(logger *zap.Logger, config *config.Config) []Option {
 			AllowHeaders:     config.CORS.AllowHeaders,
 			MaxAge:           config.CORS.MaxAge,
 		}),
-		WithTLSConfig(&TlsConfig{
-			Enabled:  config.TLS.Server.Enabled,
-			CertFile: config.TLS.Server.CertFile,
-			KeyFile:  config.TLS.Server.KeyFile,
-			ClientAuth: &TlsClientAuthConfig{
-				CertFile: config.TLS.Server.ClientAuth.CertFile,
-				Required: config.TLS.Server.ClientAuth.Required,
-			},
-		}),
+		WithTLSConfig(config.TLS),
 		WithDevelopmentMode(config.DevelopmentMode),
 		WithTracing(TraceConfigFromTelemetry(&config.Telemetry)),
 		WithMetrics(MetricConfigFromTelemetry(&config.Telemetry)),
@@ -262,6 +256,7 @@ func optionsFromResources(logger *zap.Logger, config *config.Config) []Option {
 		WithAuthorizationConfig(&config.Authorization),
 		WithWebSocketConfiguration(&config.WebSocket),
 		WithSubgraphErrorPropagation(config.SubgraphErrorPropagation),
+		WithSubgraphExtensionPropagation(config.SubgraphExtensionPropagation),
 		WithLocalhostFallbackInsideDocker(config.LocalhostFallbackInsideDocker),
 		WithCDN(config.CDN),
 		WithEvents(config.Events),
@@ -269,9 +264,11 @@ func optionsFromResources(logger *zap.Logger, config *config.Config) []Option {
 		WithClientHeader(config.ClientHeader),
 		WithCacheWarmupConfig(&config.CacheWarmup),
 		WithMCP(config.MCP),
+		WithConnectRPC(config.ConnectRPC),
 		WithPlugins(config.Plugins),
 		WithDemoMode(config.DemoMode),
 		WithStreamsHandlerConfiguration(config.Events.Handlers),
+		WithReloadPersistentState(reloadPersistentState),
 	}
 
 	return options
@@ -292,6 +289,7 @@ func setupAuthenticators(ctx context.Context, logger *zap.Logger, cfg *config.Co
 			URL:               jwks.URL,
 			RefreshInterval:   jwks.RefreshInterval,
 			AllowedAlgorithms: jwks.Algorithms,
+			AllowedUse:        jwks.AllowedUse,
 
 			Secret:    jwks.Secret,
 			Algorithm: jwks.Algorithm,

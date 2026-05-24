@@ -1,19 +1,27 @@
 import {
-  DirectiveDefinitionNode,
-  DocumentNode,
-  GraphQLSchema,
-  OperationTypeNode,
-  SchemaDefinitionNode,
-  SchemaExtensionNode,
+  type DirectiveDefinitionNode,
+  type DocumentNode,
+  type GraphQLSchema,
+  type OperationTypeNode,
+  type SchemaDefinitionNode,
+  type SchemaExtensionNode,
 } from 'graphql';
-import { ConfigurationData } from '../router-configuration/types';
+import { type ConfigurationData, type Costs } from '../router-configuration/types';
 import {
-  ConditionalFieldData,
-  EntityInterfaceSubgraphData,
-  ParentDefinitionData,
-  PersistedDirectiveDefinitionData,
-} from '../schema-building/types';
-import { DirectiveName, FieldName, SubgraphName, TypeName } from '../types/types';
+  type ConditionalFieldData,
+  type EntityInterfaceSubgraphData,
+  type ParentDefinitionData,
+} from '../schema-building/types/types';
+import {
+  type AbstractTypeName,
+  type DirectiveName,
+  type FieldName,
+  type SubgraphName,
+  type TypeName,
+} from '../types/types';
+import { type DirectiveDefinitionData } from '../directive-definition-data/types/types';
+
+// Properties are sorted alphabetically, optionals are last.
 
 export type Subgraph = {
   definitions: DocumentNode;
@@ -27,23 +35,24 @@ export type SubgraphConfig = {
   isVersionTwo: boolean;
   parentDefinitionDataByTypeName: Map<TypeName, ParentDefinitionData>;
   schema: GraphQLSchema;
+  costs?: Costs;
   schemaNode?: SchemaDefinitionNode | SchemaExtensionNode;
 };
 
 export type InternalSubgraph = {
-  conditionalFieldDataByCoordinates: Map<string, ConditionalFieldData>;
+  conditionalFieldDataByCoords: Map<string, ConditionalFieldData>;
   configurationDataByTypeName: Map<TypeName, ConfigurationData>;
   definitions: DocumentNode;
   directiveDefinitionByName: Map<DirectiveName, DirectiveDefinitionNode>;
-  entityInterfaces: Map<string, EntityInterfaceSubgraphData>;
+  entityInterfaceSubgraphDataByTypeName: Map<AbstractTypeName, EntityInterfaceSubgraphData>;
+  federatedDirectiveDataByName: Map<DirectiveName, DirectiveDefinitionData>;
   isVersionTwo: boolean;
   keyFieldNamesByParentTypeName: Map<TypeName, Set<FieldName>>;
   name: SubgraphName;
   operationTypes: Map<string, OperationTypeNode>;
   overriddenFieldNamesByParentTypeName: Map<TypeName, Set<FieldName>>;
   parentDefinitionDataByTypeName: Map<TypeName, ParentDefinitionData>;
-  persistedDirectiveDefinitionDataByDirectiveName: Map<DirectiveName, PersistedDirectiveDefinitionData>;
   schema: GraphQLSchema;
+  costs?: Costs;
   schemaNode?: SchemaDefinitionNode | SchemaExtensionNode;
-  url: string;
 };

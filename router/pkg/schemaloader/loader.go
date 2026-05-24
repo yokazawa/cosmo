@@ -8,11 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astparser"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astvalidation"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/operationreport"
-	"go.uber.org/zap"
 )
 
 // Operation represents a GraphQL operation with its AST document and schema information
@@ -23,7 +24,8 @@ type Operation struct {
 	OperationString string
 	Description     string
 	JSONSchema      json.RawMessage
-	OperationType   string // "query", "mutation", or "subscription"
+	OperationType   string     // "query", "mutation", or "subscription"
+	RequiredScopes  [][]string // OR-of-AND scope groups from @requiresScopes (nil = no scope check)
 }
 
 // OperationLoader loads GraphQL operations from files in a directory
@@ -80,7 +82,7 @@ func (l *OperationLoader) LoadOperationsFromDirectory(dirPath string) ([]Operati
 		}
 
 		// Extract the operation name and type
-		opName, opType, err := getOperationNameAndType(&opDoc)
+		opName, opType, err := GetOperationNameAndType(&opDoc)
 		if err != nil {
 			l.Logger.Error("Failed to extract MCP operation name and type", zap.String("operation", opName), zap.String("file", path), zap.Error(err))
 			return nil
@@ -160,8 +162,8 @@ func parseOperation(path string, operation string) (ast.Document, error) {
 	return opDoc, nil
 }
 
-// getOperationNameAndType extracts the name and type of the first operation in a document
-func getOperationNameAndType(doc *ast.Document) (string, string, error) {
+// GetOperationNameAndType extracts the name and type of the first operation in a document
+func GetOperationNameAndType(doc *ast.Document) (string, string, error) {
 	for _, ref := range doc.RootNodes {
 		if ref.Kind == ast.NodeKindOperationDefinition {
 			opDef := doc.OperationDefinitions[ref.Ref]

@@ -2,8 +2,11 @@ package nats
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -114,6 +117,41 @@ func buildNatsOptions(eventSource config.NatsEventSource, logger *zap.Logger) ([
 		}
 	}
 
+	if eventSource.TLS != nil {
+		tlsCfg := &tls.Config{
+			InsecureSkipVerify: eventSource.TLS.InsecureSkipCaVerification,
+		}
+
+		if eventSource.TLS.InsecureSkipCaVerification {
+			logger.Warn("TLS InsecureSkipCaVerification is enabled for NATS provider. This is not recommended for production environments.", zap.String("provider_id", eventSource.ID))
+		}
+
+		if eventSource.TLS.CaFile != "" {
+			caPEM, err := os.ReadFile(eventSource.TLS.CaFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA file %q: %w", eventSource.TLS.CaFile, err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(caPEM) {
+				return nil, fmt.Errorf("failed to parse CA certificate from %q", eventSource.TLS.CaFile)
+			}
+			tlsCfg.RootCAs = pool
+		}
+
+		if eventSource.TLS.CertFile != "" || eventSource.TLS.KeyFile != "" {
+			if eventSource.TLS.CertFile == "" || eventSource.TLS.KeyFile == "" {
+				return nil, fmt.Errorf("both cert_file and key_file must be provided for mTLS on NATS provider %q", eventSource.ID)
+			}
+			cert, err := tls.LoadX509KeyPair(eventSource.TLS.CertFile, eventSource.TLS.KeyFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load mTLS certificate/key for NATS provider %q: %w", eventSource.ID, err)
+			}
+			tlsCfg.Certificates = []tls.Certificate{cert}
+		}
+
+		opts = append(opts, nats.Secure(tlsCfg))
+	}
+
 	return opts, nil
 }
 
@@ -123,7 +161,7 @@ func buildProvider(ctx context.Context, provider config.NatsEventSource, logger 
 		return nil, fmt.Errorf("failed to build options for Nats provider with ID \"%s\": %w", provider.ID, err)
 	}
 
-	adapter, err := NewAdapter(ctx, logger, provider.URL, options, hostName, routerListenAddr, providerOpts)
+	adapter, err := NewAdapter(ctx, logger, provider.URL, options, hostName, routerListenAddr, provider.DeleteDurableConsumersOnShutdown, providerOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter for Nats provider with ID \"%s\": %w", provider.ID, err)
 	}

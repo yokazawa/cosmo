@@ -66,7 +66,7 @@ func (f *HttpFlushWriter) Complete() {
 	// Flush before closing the writer to ensure all data is sent
 	f.flusher.Flush()
 
-	f.Close(resolve.SubscriptionCloseKindNormal)
+	f.cancel()
 }
 
 func (f *HttpFlushWriter) Write(p []byte) (n int, err error) {
@@ -104,11 +104,12 @@ func (f *HttpFlushWriter) Heartbeat() error {
 	return nil
 }
 
-func (f *HttpFlushWriter) Close(_ resolve.SubscriptionCloseKind) {
+func (f *HttpFlushWriter) Error(data []byte) {
 	if f.ctx.Err() != nil {
 		return
 	}
-
+	_, _ = f.buf.Write(data)
+	_ = f.Flush()
 	f.cancel()
 }
 
@@ -143,6 +144,12 @@ func (f *HttpFlushWriter) Flush() (err error) {
 		separation = ""
 	}
 
+	// resp sometimes ends with newlines. We need to remove them
+	// to cleanly add the seperation in the next step.
+	if bytes.HasSuffix(resp, []byte{'\n'}) {
+		resp = bytes.TrimRight(resp, "\n")
+	}
+
 	full := flushBreak + string(resp) + separation
 	_, err = f.writer.Write([]byte(full))
 	if err != nil {
@@ -153,7 +160,7 @@ func (f *HttpFlushWriter) Flush() (err error) {
 	f.flusher.Flush()
 
 	if f.subscribeOnce {
-		defer f.Close(resolve.SubscriptionCloseKindNormal)
+		defer f.cancel()
 	}
 
 	return nil
@@ -213,7 +220,7 @@ func wrapMultipartMessage(resp []byte, wrapPayload bool) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	respValue, _, err := astjson.MergeValuesWithPath(payloadWrapper, respValuePreMerge, "payload")
+	respValue, _, err := astjson.MergeValuesWithPath(nil, payloadWrapper, respValuePreMerge, "payload")
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +259,7 @@ func NegotiateSubscriptionParams(r *http.Request, preferJson bool) SubscriptionP
 	// Eventually a solution will be in the stdlib: see https://github.com/golang/go/issues/19307, at which point we should
 	// remove this
 	var (
-		useMultipart = false
+		useMultipart bool
 		useSse       = q.Has(WgSseParam)
 		bestType     = ""
 		bestQ        = -1.0 // Default to lowest possible q-value

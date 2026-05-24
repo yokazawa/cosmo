@@ -1,20 +1,15 @@
 package kafka
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
-	"github.com/cespare/xxhash/v2"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/wundergraph/cosmo/router/pkg/pubsub/datasource"
 	"github.com/wundergraph/cosmo/router/pkg/pubsub/pubsubtest"
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 )
 
 func TestKafkaEngineDataSourceFactory(t *testing.T) {
@@ -62,10 +57,9 @@ func TestEngineDataSourceFactoryWithMockAdapter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Call Load on the data source
-	out := &bytes.Buffer{}
-	err = ds.Load(context.Background(), []byte(input), out)
+	data, err := ds.Load(context.Background(), nil, []byte(input))
 	require.NoError(t, err)
-	require.Equal(t, `{"success": true}`, out.String())
+	require.Equal(t, `{"__typename": "edfs__PublishResult", "success": true}`, string(data))
 }
 
 // TestEngineDataSourceFactory_GetResolveDataSource_WrongType tests the EngineDataSourceFactory with a mocked adapter
@@ -146,56 +140,74 @@ func TestKafkaEngineDataSourceFactoryMultiTopicSubscription(t *testing.T) {
 	require.Equal(t, "test-topic-2", subscriptionConfig.Topics[1], "Expected second topic to be 'test-topic-2'")
 }
 
-func TestKafkaEngineDataSourceFactory_UniqueRequestID(t *testing.T) {
-	tests := []struct {
-		name          string
-		input         string
-		expectError   bool
-		expectedError error
-	}{
-		{
-			name:        "valid input",
-			input:       `{"topics":["topic1", "topic2"], "providerId":"test-provider"}`,
-			expectError: false,
-		},
-		{
-			name:          "missing topics",
-			input:         `{"providerId":"test-provider"}`,
-			expectError:   true,
-			expectedError: errors.New("Key path not found"),
-		},
-		{
-			name:          "missing providerId",
-			input:         `{"topics":["topic1", "topic2"]}`,
-			expectError:   true,
-			expectedError: errors.New("Key path not found"),
-		},
-	}
+func TestTransformEventConfig(t *testing.T) {
+	t.Run("publish event", func(t *testing.T) {
+		cfg := &EngineDataSourceFactory{
+			providerId: "test-provider",
+			eventType:  EventTypePublish,
+			topics:     []string{"original.topic"},
+			fieldName:  "testField",
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			factory := &EngineDataSourceFactory{
-				KafkaAdapter: datasource.NewMockProvider(t),
-			}
-			source, err := factory.ResolveDataSourceSubscription()
-			require.NoError(t, err)
-			ctx := &resolve.Context{}
-			input := []byte(tt.input)
-			xxh := xxhash.New()
+		transformFn := func(s string) (string, error) {
+			return "transformed." + s, nil
+		}
 
-			err = source.UniqueRequestID(ctx, input, xxh)
+		err := cfg.TransformEventData(transformFn)
+		require.NoError(t, err)
+		require.Equal(t, []string{"transformed.original.topic"}, cfg.topics)
+	})
 
-			if tt.expectError {
-				require.Error(t, err)
-				if tt.expectedError != nil {
-					// For jsonparser errors, just check if the error message contains the expected text
-					assert.Contains(t, err.Error(), tt.expectedError.Error())
+	t.Run("publish event invalid topic count", func(t *testing.T) {
+		testCases := []struct {
+			name        string
+			topics      []string
+			expectedErr string
+		}{
+			{
+				name:        "no topics",
+				topics:      nil,
+				expectedErr: "publish event definition should define one topic but has 0",
+			},
+			{
+				name:        "multiple topics",
+				topics:      []string{"topic.one", "topic.two"},
+				expectedErr: "publish event definition should define one topic but has 2",
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				cfg := &EngineDataSourceFactory{
+					providerId: "test-provider",
+					eventType:  EventTypePublish,
+					topics:     append([]string(nil), tc.topics...),
+					fieldName:  "testField",
 				}
-			} else {
-				require.NoError(t, err)
-				// Check that the hash has been updated
-				assert.NotEqual(t, 0, xxh.Sum64())
-			}
-		})
-	}
+
+				err := cfg.TransformEventData(func(s string) (string, error) {
+					return "transformed." + s, nil
+				})
+				require.ErrorContains(t, err, tc.expectedErr)
+				require.Equal(t, tc.topics, cfg.topics)
+			})
+		}
+	})
+
+	t.Run("subscribe event", func(t *testing.T) {
+		cfg := &EngineDataSourceFactory{
+			providerId: "test-provider",
+			eventType:  EventTypeSubscribe,
+			topics:     []string{"original.topic2", "original.topic1"},
+			fieldName:  "testField",
+		}
+
+		transformFn := func(s string) (string, error) {
+			return "transformed." + s, nil
+		}
+
+		err := cfg.TransformEventData(transformFn)
+		require.NoError(t, err)
+		require.Equal(t, []string{"transformed.original.topic1", "transformed.original.topic2"}, cfg.topics)
+	})
 }

@@ -1,27 +1,19 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"sort"
-	"strconv"
-	"sync"
 	"time"
 
 	"github.com/wundergraph/cosmo/router/internal/circuit"
-
 	"github.com/wundergraph/cosmo/router/internal/expr"
 	"github.com/wundergraph/cosmo/router/internal/traceclient"
-
 	"go.opentelemetry.io/otel/propagation"
 
 	otelmetric "go.opentelemetry.io/otel/metric"
 
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/httpclient"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
@@ -31,8 +23,6 @@ import (
 	"github.com/wundergraph/cosmo/router/pkg/otel"
 	"github.com/wundergraph/cosmo/router/pkg/trace"
 
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/pool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	otrace "go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -52,16 +42,6 @@ type CustomTransport struct {
 	postHandlers []TransportPostHandler
 	metricStore  metric.Store
 	logger       *zap.Logger
-
-	sf   map[uint64]*sfCacheItem
-	sfMu *sync.RWMutex
-}
-
-type sfCacheItem struct {
-	loaded   chan struct{}
-	response *http.Response
-	body     []byte
-	err      error
 }
 
 func NewCustomTransport(
@@ -69,7 +49,6 @@ func NewCustomTransport(
 	retryOptions retrytransport.RetryOptions,
 	metricStore metric.Store,
 	connectionMetricStore metric.ConnectionMetricStore,
-	enableSingleFlight bool,
 	breaker *circuit.Manager,
 	enableTraceClient bool,
 ) *CustomTransport {
@@ -111,10 +90,6 @@ func NewCustomTransport(
 		ct.roundTripper = retrytransport.NewRetryHTTPTransport(baseRoundTripper, retryOptions, getRequestContextLogger)
 	} else {
 		ct.roundTripper = baseRoundTripper
-	}
-	if enableSingleFlight {
-		ct.sf = make(map[uint64]*sfCacheItem)
-		ct.sfMu = &sync.RWMutex{}
 	}
 
 	return ct
@@ -184,11 +159,7 @@ func (ct *CustomTransport) RoundTrip(req *http.Request) (resp *http.Response, er
 		}
 	}
 
-	if !ct.allowSingleFlight(req) {
-		resp, err = ct.roundTripper.RoundTrip(req)
-	} else {
-		resp, err = ct.roundTripSingleFlight(req)
-	}
+	resp, err = ct.roundTripper.RoundTrip(req)
 
 	// Set the error on the request context so that it can be checked by the post handlers
 	if err != nil {
@@ -212,135 +183,6 @@ func (ct *CustomTransport) RoundTrip(req *http.Request) (resp *http.Response, er
 	return resp, err
 }
 
-func (ct *CustomTransport) allowSingleFlight(req *http.Request) bool {
-	if ct.sf == nil {
-		// Single flight is disabled
-		return false
-	}
-
-	if req.Header.Get("Upgrade") != "" {
-		// Websocket requests are not idempotent
-		return false
-	}
-
-	if req.Header.Get("Accept") == "text/event-stream" {
-		// SSE requests are not idempotent
-		return false
-	}
-
-	if resolve.SingleFlightDisallowed(req.Context()) {
-		// Single flight is disallowed for this request (e.g. because it is a Mutation)
-		return false
-	}
-
-	return true
-}
-
-func (ct *CustomTransport) roundTripSingleFlight(req *http.Request) (*http.Response, error) {
-	key := ct.singleFlightKey(req)
-	ct.sfMu.RLock()
-	item, shared := ct.sf[key]
-	ct.sfMu.RUnlock()
-
-	sfStats := resolve.GetSingleFlightStats(req.Context())
-	if sfStats != nil {
-		sfStats.SingleFlightUsed = true
-		sfStats.SingleFlightSharedResponse = shared
-	}
-
-	if shared {
-		select {
-		case <-item.loaded:
-		case <-req.Context().Done():
-			return nil, req.Context().Err()
-		}
-
-		// If the single flight item has an error, return it immediately
-		// This happens e.g. on network errors
-		if item.err != nil {
-			return nil, item.err
-		}
-
-		res := &http.Response{}
-		res.Status = item.response.Status
-		res.StatusCode = item.response.StatusCode
-		res.Header = item.response.Header
-		res.Trailer = item.response.Trailer
-		res.ContentLength = item.response.ContentLength
-		res.TransferEncoding = item.response.TransferEncoding
-		res.Close = item.response.Close
-		res.Uncompressed = item.response.Uncompressed
-		res.Request = req
-
-		// Restore the body
-		res.Body = io.NopCloser(bytes.NewReader(item.body))
-		return res, item.err
-	}
-
-	if sfStats != nil {
-		sfStats.SingleFlightUsed = true
-		sfStats.SingleFlightSharedResponse = false
-	}
-
-	item = &sfCacheItem{
-		loaded: make(chan struct{}),
-	}
-	ct.sfMu.Lock()
-	ct.sf[key] = item
-	ct.sfMu.Unlock()
-	defer func() {
-		close(item.loaded)
-		ct.sfMu.Lock()
-		delete(ct.sf, key)
-		ct.sfMu.Unlock()
-	}()
-
-	res, err := ct.roundTripper.RoundTrip(req)
-	if err != nil {
-		item.err = err
-		return nil, err
-	}
-
-	defer res.Body.Close()
-
-	item.body, err = io.ReadAll(res.Body)
-	if err != nil {
-		item.err = err
-		return nil, err
-	}
-
-	item.response = res
-
-	// Restore the body
-	res.Body = io.NopCloser(bytes.NewReader(item.body))
-
-	return res, nil
-}
-
-func (ct *CustomTransport) singleFlightKey(req *http.Request) uint64 {
-	keyGen := pool.Hash64.Get()
-	defer pool.Hash64.Put(keyGen)
-
-	if bodyHash, ok := httpclient.BodyHashFromContext(req.Context()); ok {
-		_, _ = keyGen.WriteString(strconv.FormatUint(bodyHash, 10))
-	}
-
-	unsortedHeaders := make([]string, 0, len(req.Header))
-
-	for key := range req.Header {
-		value := req.Header.Get(key)
-		unsortedHeaders = append(unsortedHeaders, key+value)
-	}
-
-	sort.Strings(unsortedHeaders)
-	for i := range unsortedHeaders {
-		_, _ = keyGen.WriteString(unsortedHeaders[i])
-	}
-
-	sum := keyGen.Sum64()
-	return sum
-}
-
 type TransportFactory struct {
 	preHandlers                   []TransportPreHandler
 	postHandlers                  []TransportPostHandler
@@ -352,6 +194,7 @@ type TransportFactory struct {
 	logger                        *zap.Logger
 	tracerProvider                *sdktrace.TracerProvider
 	tracePropagators              propagation.TextMapPropagator
+	spanNameFormatter             SpanNameFormatterFunc
 	enableTraceClient             bool
 }
 
@@ -369,17 +212,24 @@ type TransportOptions struct {
 	Logger                        *zap.Logger
 	TracerProvider                *sdktrace.TracerProvider
 	TracePropagators              propagation.TextMapPropagator
+	SpanNameFormatter             SpanNameFormatterFunc
 	EnableTraceClient             bool
 }
 
 type SubscriptionClientOptions struct {
-	PingInterval time.Duration
-	PingTimeout  time.Duration
-	ReadTimeout  time.Duration
-	FrameTimeout time.Duration
+	PingInterval              time.Duration
+	PingTimeout               time.Duration
+	WriteTimeout              time.Duration
+	AckTimeout                time.Duration
+	ReadLimit                 int64
+	DefaultErrorExtensionCode string
 }
 
 func NewTransport(opts *TransportOptions) *TransportFactory {
+	spanNameFormatter := opts.SpanNameFormatter
+	if spanNameFormatter == nil {
+		spanNameFormatter = DefaultSpanNameFormatter
+	}
 	return &TransportFactory{
 		preHandlers:                   opts.PreHandlers,
 		postHandlers:                  opts.PostHandlers,
@@ -390,20 +240,23 @@ func NewTransport(opts *TransportOptions) *TransportFactory {
 		logger:                        opts.Logger,
 		tracerProvider:                opts.TracerProvider,
 		tracePropagators:              opts.TracePropagators,
+		spanNameFormatter:             spanNameFormatter,
 		circuitBreaker:                opts.CircuitBreaker,
 		enableTraceClient:             opts.EnableTraceClient,
 	}
 }
 
-func (t TransportFactory) RoundTripper(enableSingleFlight bool, baseTransport http.RoundTripper) http.RoundTripper {
+func (t TransportFactory) RoundTripper(baseTransport http.RoundTripper) http.RoundTripper {
 	if t.localhostFallbackInsideDocker && docker.Inside() {
 		baseTransport = docker.NewLocalhostFallbackRoundTripper(baseTransport)
 	}
 
 	otelHttpOptions := []otelhttp.Option{
-		otelhttp.WithSpanNameFormatter(SpanNameFormatter),
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return t.spanNameFormatter(r)
+		}),
 		otelhttp.WithSpanOptions(otrace.WithAttributes(otel.EngineTransportAttribute)),
-		otelhttp.WithTracerProvider(t.tracerProvider),
+		otelhttp.WithTracerProvider(&trace.FilteringTracerProvider{TracerProvider: t.tracerProvider}),
 	}
 
 	if t.tracePropagators != nil {
@@ -435,7 +288,6 @@ func (t TransportFactory) RoundTripper(enableSingleFlight bool, baseTransport ht
 		t.retryOptions,
 		t.metricStore,
 		t.connectionMetricStore,
-		enableSingleFlight,
 		t.circuitBreaker,
 		t.enableTraceClient,
 	)
@@ -451,8 +303,8 @@ func (t TransportFactory) DefaultHTTPProxyURL() *url.URL {
 	return nil
 }
 
-// SpanNameFormatter formats the span name based on the http request
-func SpanNameFormatter(_ string, r *http.Request) string {
+// DefaultSpanNameFormatter is the built-in span name formatter.
+func DefaultSpanNameFormatter(r *http.Request) string {
 	requestContext := getRequestContext(r.Context())
 
 	if requestContext != nil && requestContext.operation != nil {
@@ -472,6 +324,7 @@ func GetSpanName(operationName string, operationType string) string {
 func CreateGRPCTraceGetter(
 	telemetryAttributeExpressions *attributeExpressions,
 	tracingAttributeExpressions *attributeExpressions,
+	spanNameFormatter SpanNameFormatterFunc,
 ) func(context.Context) (string, otrace.SpanStartEventOption) {
 	return func(ctx context.Context) (string, otrace.SpanStartEventOption) {
 		reqCtx := getRequestContext(ctx)
@@ -510,7 +363,7 @@ func CreateGRPCTraceGetter(
 		// Override http operation protocol with grpc
 		attrs = append(attrs, otel.EngineTransportAttribute, otel.WgOperationProtocol.String(OperationProtocolGRPC.String()))
 
-		spanName := SpanNameFormatter("", reqCtx.request)
+		spanName := spanNameFormatter(reqCtx.request)
 		return spanName, otrace.WithAttributes(attrs...)
 	}
 }

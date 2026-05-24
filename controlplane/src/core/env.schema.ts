@@ -54,6 +54,10 @@ export const envVariables = z
      */
     OPENAI_API_KEY: z.string().optional(),
     /**
+     * Composition workers
+     */
+    COMPOSITION_MAX_THREADS: z.coerce.number().int().min(0).default(0),
+    /**
      * Auth
      */
     AUTH_JWT_SECRET: z.string().min(32).max(32),
@@ -93,6 +97,7 @@ export const envVariables = z
      */
     WEBHOOK_URL: z.string().optional(),
     WEBHOOK_SECRET: z.string().optional(),
+    WEBHOOK_PROXY_URL: z.string().url().optional(),
     /**
      * GitHub Integration
      */
@@ -154,6 +159,22 @@ export const envVariables = z
      * Whether to use individual deletes for S3 objects instead of bulking them.
      */
     S3_USE_INDIVIDUAL_DELETES: z
+      .string()
+      .transform((val) => val === 'true')
+      .optional(),
+    /**
+     * S3 Failover Storage (optional secondary bucket for resilience)
+     */
+    S3_FAILOVER_STORAGE_URL: z.string().optional(),
+    S3_FAILOVER_ENDPOINT: z.string().optional(),
+    S3_FAILOVER_REGION: z.string().default('auto'),
+    S3_FAILOVER_ACCESS_KEY_ID: z.string().optional(),
+    S3_FAILOVER_SECRET_ACCESS_KEY: z.string().optional(),
+    S3_FAILOVER_FORCE_PATH_STYLE: z
+      .string()
+      .transform((val) => val === 'true')
+      .optional(),
+    S3_FAILOVER_USE_INDIVIDUAL_DELETES: z
       .string()
       .transform((val) => val === 'true')
       .optional(),

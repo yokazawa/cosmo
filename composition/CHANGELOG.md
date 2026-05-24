@@ -4,6 +4,126 @@ Binaries are attached to the github release otherwise all images can be found [h
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [0.59.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.58.4...@wundergraph/composition@0.59.0) (2026-05-18)
+
+### Features
+
+* support dot-path in slicingArguments ([#2801](https://github.com/wundergraph/cosmo/issues/2801)) ([aec1738](https://github.com/wundergraph/cosmo/commit/aec1738c071e028893239b6c4f9bf492cf175f36)) (@ysmolski)
+
+## [0.58.4](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.58.3...@wundergraph/composition@0.58.4) (2026-05-14)
+
+### Bug Fixes
+
+* **composition:** apply subscription filters on union and interface return types ([#2797](https://github.com/wundergraph/cosmo/issues/2797)) ([4c91d4f](https://github.com/wundergraph/cosmo/commit/4c91d4fd7420b19b2e9aa0dd382ba7e1c95b85a3)) (@jensneuse)
+
+## [0.58.3](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.58.2...@wundergraph/composition@0.58.3) (2026-05-07)
+
+**Note:** Version bump only for package @wundergraph/composition
+
+## [0.58.2](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.58.1...@wundergraph/composition@0.58.2) (2026-05-01)
+
+### Bug Fixes
+
+* import set methods explicitly ([#2812](https://github.com/wundergraph/cosmo/issues/2812)) ([aa5cae1](https://github.com/wundergraph/cosmo/commit/aa5cae10723fef95fceaa89995233529c39dbc01)) (@Aenimus)
+
+## [0.58.1](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.58.0...@wundergraph/composition@0.58.1) (2026-05-01)
+
+**Note:** Version bump only for package @wundergraph/composition
+
+# [0.58.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.57.0...@wundergraph/composition@0.58.0) (2026-04-29)
+
+### Features
+
+* centralize TS dependency management via catalogs ([#2782](https://github.com/wundergraph/cosmo/issues/2782)) ([a6a6956](https://github.com/wundergraph/cosmo/commit/a6a69565727f01a942a16e6d560d0fedabcb531e)) (@comatory)
+* **router:** support costs on arguments of directives ([#2781](https://github.com/wundergraph/cosmo/issues/2781)) ([b70a55b](https://github.com/wundergraph/cosmo/commit/b70a55b85b3f50468e3d1218d6746d51cc1b4733)) (@ysmolski)
+
+# [0.57.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.56.0...@wundergraph/composition@0.57.0) (2026-04-24)
+
+### Features
+
+* update `lodash` and `lodash-es` ([#2780](https://github.com/wundergraph/cosmo/issues/2780)) ([bbf1e38](https://github.com/wundergraph/cosmo/commit/bbf1e38b3a346363fe742801f2982dbafb267454)) (@wilsonrivera)
+
+# [0.56.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.55.1...@wundergraph/composition@0.56.0) (2026-04-15)
+
+### Features
+
+* allow string kind enum default values ([#2767](https://github.com/wundergraph/cosmo/issues/2767)) ([addfbc6](https://github.com/wundergraph/cosmo/commit/addfbc6747114b5afb8720426c30874a42ab7efa)) (@Aenimus)
+
+## [0.55.1](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.55.0...@wundergraph/composition@0.55.1) (2026-04-14)
+
+### Bug Fixes
+
+* allow interface subtype for implemented interface fields ([#2764](https://github.com/wundergraph/cosmo/issues/2764)) ([8fe04a8](https://github.com/wundergraph/cosmo/commit/8fe04a835ce0bbb8f1ab9ded2ed3ef93fe59ee10)) (@Aenimus)
+* short-circuit before propagating non-fully validated resolvabili… ([#2759](https://github.com/wundergraph/cosmo/issues/2759)) ([b39e30e](https://github.com/wundergraph/cosmo/commit/b39e30ee72fe594c94f65445c1d362345ca54f63)) (@Aenimus)
+
+# [0.55.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.54.1...@wundergraph/composition@0.55.0) (2026-04-02)
+
+### Features
+
+* fix long composition errors ([#2728](https://github.com/wundergraph/cosmo/issues/2728)) ([d376585](https://github.com/wundergraph/cosmo/commit/d37658546d5678e9f5a6e8a386e297a6061c57f6)) (@wilsonrivera)
+
+## [0.54.1](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.54.0...@wundergraph/composition@0.54.1) (2026-03-18)
+
+**Note:** Version bump only for package @wundergraph/composition
+
+# [0.54.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.53.0...@wundergraph/composition@0.54.0) (2026-03-17)
+
+### Features
+
+* expose costs ([#2470](https://github.com/wundergraph/cosmo/issues/2470)) ([d43aa40](https://github.com/wundergraph/cosmo/commit/d43aa40f2429fbb212e5618cd5586774e1b6ae7e)) (@ysmolski)
+
+# [0.53.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.52.0...@wundergraph/composition@0.53.0) (2026-03-10)
+
+### Features
+
+* add composition options ([#2595](https://github.com/wundergraph/cosmo/issues/2595)) ([1cba9ab](https://github.com/wundergraph/cosmo/commit/1cba9ab997a64e8bea18a7f6f01507f2ec2dd82b)) (@Aenimus)
+
+# [0.52.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.51.2...@wundergraph/composition@0.52.0) (2026-03-05)
+
+### Features
+
+* add format script + optional git hooks ([#2579](https://github.com/wundergraph/cosmo/issues/2579)) ([edabd2b](https://github.com/wundergraph/cosmo/commit/edabd2bd8f775c5717ca785f16616cff6f7ae039)) (@comatory)
+
+## [0.51.2](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.51.1...@wundergraph/composition@0.51.2) (2026-02-28)
+
+### Bug Fixes
+
+* handle fully external, unresolvable entity keys ([#2568](https://github.com/wundergraph/cosmo/issues/2568)) ([3168ab0](https://github.com/wundergraph/cosmo/commit/3168ab04eba3ca2c8ba353a8e7e6419fd62ae1c7)) (@Aenimus)
+
+## [0.51.1](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.51.0...@wundergraph/composition@0.51.1) (2026-02-12)
+
+### Bug Fixes
+
+* do not re-evaluate internal graph nodes if all its descendants a… ([#2499](https://github.com/wundergraph/cosmo/issues/2499)) ([2fa2dfd](https://github.com/wundergraph/cosmo/commit/2fa2dfd35b78b0e84fa18dcb99590cdee5abec08)) (@Aenimus)
+
+# [0.51.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.50.0...@wundergraph/composition@0.51.0) (2026-02-09)
+
+### Features
+
+* update @graphql-tools/utils version to 11.0.0 ([#2495](https://github.com/wundergraph/cosmo/issues/2495)) ([526b1a4](https://github.com/wundergraph/cosmo/commit/526b1a498ae709b67ec37626bfc665babafd8aa8)) (@thisisnithin)
+
+# [0.50.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.49.2...@wundergraph/composition@0.50.0) (2026-01-20)
+
+### Features
+
+* add an explanation on how to deal when adding a value to a shared enum ([#2456](https://github.com/wundergraph/cosmo/issues/2456)) ([57dc1b9](https://github.com/wundergraph/cosmo/commit/57dc1b90e07d09a25f8887c46eb73622362ff752)) (@alepane21)
+
+## [0.49.2](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.49.1...@wundergraph/composition@0.49.2) (2026-01-16)
+
+### Bug Fixes
+
+* operation validation false positives ([#2460](https://github.com/wundergraph/cosmo/issues/2460)) ([057e762](https://github.com/wundergraph/cosmo/commit/057e7621c777b961854bd0472e73a5da0e9e5186)) (@Aenimus)
+
+## [0.49.1](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.49.0...@wundergraph/composition@0.49.1) (2026-01-09)
+
+**Note:** Version bump only for package @wundergraph/composition
+
+# [0.49.0](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.48.5...@wundergraph/composition@0.49.0) (2025-12-15)
+
+### Features
+
+* add coverage for other services with tests ([#2405](https://github.com/wundergraph/cosmo/issues/2405)) ([a53bb35](https://github.com/wundergraph/cosmo/commit/a53bb351336dc400b8b28b235a28725704a83919)) (@SkArchon)
+
 ## [0.48.5](https://github.com/wundergraph/cosmo/compare/@wundergraph/composition@0.48.4...@wundergraph/composition@0.48.5) (2025-11-20)
 
 ### Bug Fixes

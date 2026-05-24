@@ -2,6 +2,7 @@ import { EnumStatusCode } from '@wundergraph/cosmo-connect/dist/common/common_pb
 import AuthUtils from '../auth-utils.js';
 import { AuthenticationError } from '../errors/errors.js';
 import { OrganizationRepository } from '../repositories/OrganizationRepository.js';
+import { traced } from '../tracing.js';
 import { RBACEvaluator } from './RBACEvaluator.js';
 
 export type AccessTokenAuthContext = {
@@ -14,6 +15,7 @@ export type AccessTokenAuthContext = {
   rbac: RBACEvaluator;
 };
 
+@traced
 export default class AccessTokenAuthenticator {
   constructor(
     private orgRepo: OrganizationRepository,
@@ -26,7 +28,10 @@ export default class AccessTokenAuthenticator {
   public async authenticate(accessToken: string, organizationSlug: string | null): Promise<AccessTokenAuthContext> {
     const userInfoData = await this.authUtils.getUserInfo(accessToken);
 
-    const orgSlug = organizationSlug || userInfoData.groups[0].split('/')[1];
+    const orgSlug = organizationSlug || userInfoData.groups?.[0]?.split('/')?.[1];
+    if (!orgSlug) {
+      throw new AuthenticationError(EnumStatusCode.ERROR_NOT_AUTHENTICATED, 'Cannot determine organization slug');
+    }
 
     const organization = await this.orgRepo.bySlug(orgSlug);
 
@@ -61,5 +66,9 @@ export default class AccessTokenAuthenticator {
       organizationDeactivated,
       rbac,
     };
+  }
+
+  public getUserInfo(accessToken: string) {
+    return this.authUtils.getUserInfo(accessToken);
   }
 }

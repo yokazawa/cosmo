@@ -1,27 +1,26 @@
 import { describe, expect, test } from 'vitest';
 import {
   ARGUMENT_DEFINITION_UPPER,
-  BatchNormalizationSuccess,
-  ConfigurationData,
+  type BatchNormalizationSuccess,
+  type ConfigurationData,
   duplicateOverriddenFieldErrorMessage,
   duplicateOverriddenFieldsError,
   equivalentSourceAndTargetOverrideErrorMessage,
-  FieldData,
+  type FieldData,
   FIRST_ORDINAL,
   invalidDirectiveError,
   invalidDirectiveLocationErrorMessage,
   invalidFieldShareabilityError,
   invalidOverrideTargetSubgraphNameWarning,
-  ObjectDefinitionData,
+  type ObjectDefinitionData,
   OVERRIDE,
   parse,
   ROUTER_COMPATIBILITY_VERSION_ONE,
-  Subgraph,
+  type Subgraph,
   subgraphValidationError,
-  TypeName,
+  type TypeName,
 } from '../../../src';
 import { SCHEMA_QUERY_DEFINITION } from '../utils/utils';
-import { batchNormalize } from '../../../src/v1/normalization/normalization-factory';
 import {
   federateSubgraphsFailure,
   federateSubgraphsSuccess,
@@ -29,6 +28,7 @@ import {
   normalizeSubgraphFailure,
   schemaToSortedNormalizedString,
 } from '../../utils/utils';
+import { BatchNormalizer } from '../../../src';
 
 describe('@override directive tests', () => {
   describe('normalization tests', () => {
@@ -43,13 +43,15 @@ describe('@override directive tests', () => {
     });
 
     test('that @override produces the correct engine configuration', () => {
-      const result = batchNormalize([subgraphA, subgraphE, subgraphF]) as BatchNormalizationSuccess;
+      const result = new BatchNormalizer({
+        subgraphs: [subgraphA, subgraphE, subgraphF],
+      }).batchNormalize() as BatchNormalizationSuccess;
       expect(result.success).toBe(true);
-      const a = result.internalSubgraphBySubgraphName.get('subgraph-a');
+      const a = result.internalSubgraphByName.get('subgraph-a');
       expect(a).toBeDefined();
-      const e = result.internalSubgraphBySubgraphName.get('subgraph-e');
+      const e = result.internalSubgraphByName.get('subgraph-e');
       expect(e).toBeDefined();
-      const g = result.internalSubgraphBySubgraphName.get('subgraph-f');
+      const g = result.internalSubgraphByName.get('subgraph-f');
       expect(g).toBeDefined();
       expect(a!.configurationDataByTypeName).toStrictEqual(
         new Map<TypeName, ConfigurationData>([

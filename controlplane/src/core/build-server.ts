@@ -1,6 +1,7 @@
 import Fastify, { FastifyBaseLogger } from 'fastify';
 import { S3Client } from '@aws-sdk/client-s3';
 import { fastifyConnectPlugin } from '@connectrpc/connect-fastify';
+import * as Sentry from '@sentry/node';
 import { cors, createContextValues } from '@connectrpc/connect';
 import fastifyCors from '@fastify/cors';
 import { pino, stdTimeFunctions, LoggerOptions } from 'pino';
@@ -29,7 +30,7 @@ import Keycloak from './services/Keycloak.js';
 import { PlatformWebhookService } from './webhooks/PlatformWebhookService.js';
 import AccessTokenAuthenticator from './services/AccessTokenAuthenticator.js';
 import { GitHubRepository } from './repositories/GitHubRepository.js';
-import { S3BlobStorage } from './blobstorage/index.js';
+import { S3BlobStorage, DualBlobStorage, type BlobStorage } from './blobstorage/index.js';
 import Mailer from './services/Mailer.js';
 import { OrganizationInvitationRepository } from './repositories/OrganizationInvitationRepository.js';
 import { Authorization } from './services/Authorization.js';
@@ -37,7 +38,13 @@ import { BillingRepository } from './repositories/BillingRepository.js';
 import { BillingService } from './services/BillingService.js';
 import { UserRepository } from './repositories/UserRepository.js';
 import { AIGraphReadmeQueue, createAIGraphReadmeWorker } from './workers/AIGraphReadmeWorker.js';
-import { fastifyLoggerId, createS3ClientConfig, extractS3BucketName, isGoogleCloudStorageUrl } from './util.js';
+import {
+  fastifyLoggerId,
+  sentrySpanId,
+  createS3ClientConfig,
+  extractS3BucketName,
+  isGoogleCloudStorageUrl,
+} from './util.js';
 import { ApiKeyRepository } from './repositories/ApiKeyRepository.js';
 import { createDeleteOrganizationWorker, DeleteOrganizationQueue } from './workers/DeleteOrganizationWorker.js';
 import {
@@ -53,9 +60,13 @@ import {
   createReactivateOrganizationWorker,
   ReactivateOrganizationQueue,
 } from './workers/ReactivateOrganizationWorker.js';
+import { configureComposeGraphsPool, destroyComposeGraphsPool } from './composition/composeGraphs.pool.js';
 
 export interface BuildConfig {
   logger: LoggerOptions;
+  composition?: {
+    maxThreads: number;
+  };
   database: {
     url: string;
     tls?: {
@@ -90,6 +101,7 @@ export interface BuildConfig {
   webhook?: {
     url?: string;
     key?: string;
+    proxyUrl?: string;
   };
   githubApp?: {
     webhookSecret?: string;
@@ -101,6 +113,15 @@ export interface BuildConfig {
   slack: { clientID?: string; clientSecret?: string };
   cdnBaseUrl: string;
   s3Storage: {
+    url: string;
+    endpoint?: string;
+    region?: string;
+    username?: string;
+    password?: string;
+    forcePathStyle?: boolean;
+    useIndividualDeletes?: boolean;
+  };
+  s3StorageFailover?: {
     url: string;
     endpoint?: string;
     region?: string;
@@ -157,6 +178,10 @@ const developmentLoggerOpts: LoggerOptions = {
 };
 
 export default async function build(opts: BuildConfig) {
+  configureComposeGraphsPool({
+    maxThreads: opts.composition?.maxThreads ?? 0,
+  });
+
   opts.logger = {
     timestamp: stdTimeFunctions.isoTime,
     formatters: {
@@ -175,6 +200,20 @@ export default async function build(opts: BuildConfig) {
     logger,
     // The maximum amount of time in *milliseconds* in which a plugin can load
     pluginTimeout: 10_000, // 10s
+  });
+
+  /**
+   * CVE-2026-25223 prevention
+   */
+  fastify.addHook('onRequest', async (request, reply) => {
+    const contentType = request.headers['content-type'];
+
+    const contentTypeNormalized = contentType || [];
+    const contentTypeValues = Array.isArray(contentTypeNormalized) ? contentTypeNormalized : [contentTypeNormalized];
+
+    if (contentTypeValues.some((v) => v.includes('\t'))) {
+      await reply.code(400).send({ error: 'Invalid Content-Type header' });
+    }
   });
 
   /**
@@ -246,10 +285,17 @@ export default async function build(opts: BuildConfig) {
   const apiKeyAuth = new ApiKeyAuthenticator(fastify.db, organizationRepository);
   const userRepo = new UserRepository(logger, fastify.db);
   const apiKeyRepository = new ApiKeyRepository(fastify.db);
-  const webAuth = new WebSessionAuthenticator(opts.auth.secret, userRepo);
+  const webAuth = new WebSessionAuthenticator(fastify.db, opts.auth.secret, userRepo);
   const graphKeyAuth = new GraphApiTokenAuthenticator(opts.auth.secret);
   const accessTokenAuth = new AccessTokenAuthenticator(organizationRepository, authUtils);
-  const authenticator = new Authentication(webAuth, apiKeyAuth, accessTokenAuth, graphKeyAuth, organizationRepository);
+  const authenticator = new Authentication(
+    webAuth,
+    apiKeyAuth,
+    accessTokenAuth,
+    graphKeyAuth,
+    organizationRepository,
+    logger,
+  );
 
   const authorizer = new Authorization(logger, opts.stripe?.defaultPlanId);
 
@@ -260,6 +306,7 @@ export default async function build(opts: BuildConfig) {
     adminUser: opts.keycloak.adminUser,
     adminPassword: opts.keycloak.adminPassword,
     logger,
+    webhookProxyUrl: opts.webhook?.proxyUrl,
   });
 
   let mailerClient: Mailer | undefined;
@@ -313,15 +360,37 @@ export default async function build(opts: BuildConfig) {
   const s3Config = createS3ClientConfig(bucketName, opts.s3Storage);
 
   const s3Client = new S3Client(s3Config);
-  const blobStorage = new S3BlobStorage(s3Client, bucketName, {
+  const primaryBlobStorage = new S3BlobStorage(s3Client, bucketName, {
     // GCS does not support DeleteObjects; force individual deletes when detected.
     useIndividualDeletes:
       isGoogleCloudStorageUrl(opts.s3Storage.url) || isGoogleCloudStorageUrl(s3Config.endpoint as string)
         ? true
-        : opts.s3Storage.useIndividualDeletes ?? false,
+        : (opts.s3Storage.useIndividualDeletes ?? false),
   });
 
-  const platformWebhooks = new PlatformWebhookService(opts.webhook?.url, opts.webhook?.key, logger);
+  let blobStorage: BlobStorage = primaryBlobStorage;
+
+  if (opts.s3StorageFailover?.url) {
+    const failoverBucketName = extractS3BucketName(opts.s3StorageFailover);
+    const failoverS3Config = createS3ClientConfig(failoverBucketName, opts.s3StorageFailover);
+    const failoverS3Client = new S3Client(failoverS3Config);
+    const failoverBlobStorage = new S3BlobStorage(failoverS3Client, failoverBucketName, {
+      useIndividualDeletes:
+        isGoogleCloudStorageUrl(opts.s3StorageFailover.url) ||
+        isGoogleCloudStorageUrl(failoverS3Config.endpoint as string)
+          ? true
+          : (opts.s3StorageFailover.useIndividualDeletes ?? false),
+    });
+
+    blobStorage = new DualBlobStorage(primaryBlobStorage, failoverBlobStorage);
+  }
+
+  const platformWebhooks = new PlatformWebhookService(
+    opts.webhook?.url,
+    opts.webhook?.key,
+    logger,
+    opts.webhook?.proxyUrl,
+  );
 
   const readmeQueue = new AIGraphReadmeQueue(logger, fastify.redisForQueue);
 
@@ -470,6 +539,16 @@ export default async function build(opts: BuildConfig) {
     keycloakRealm: opts.keycloak.realm,
   });
 
+  // Capture the active Sentry span in preHandler (where OTEL context is still available)
+  // and store it on the request so Connect interceptors can use it as parentSpan.
+  fastify.addHook('preHandler', (req, _reply, done) => {
+    const span = Sentry.getActiveSpan();
+    if (span) {
+      (req.raw as any).__sentrySpan = span;
+    }
+    done();
+  });
+
   // Must be registered after custom fastify routes
   // Because it registers an all-catch route for connect handlers
 
@@ -502,10 +581,20 @@ export default async function build(opts: BuildConfig) {
       },
       stripeSecretKey: opts.stripe?.secret,
       admissionWebhookJWTSecret: opts.admissionWebhook.secret,
+      webhookProxyUrl: opts.webhook?.proxyUrl,
       cdnBaseUrl: opts.cdnBaseUrl,
     }),
     contextValues(req) {
-      return createContextValues().set<FastifyBaseLogger>({ id: fastifyLoggerId, defaultValue: req.log }, req.log);
+      const values = createContextValues().set<FastifyBaseLogger>(
+        { id: fastifyLoggerId, defaultValue: req.log },
+        req.log,
+      );
+      // Read the parent span captured during the preHandler hook
+      const parentSpan = (req.raw as any).__sentrySpan;
+      if (parentSpan) {
+        values.set({ id: sentrySpanId, defaultValue: undefined }, parentSpan);
+      }
+      return values;
     },
     logLevel: opts.logger.level as pino.LevelWithSilent,
     // Avoid compression for small requests
@@ -516,6 +605,18 @@ export default async function build(opts: BuildConfig) {
     // We go with 32MiB to avoid allocating too much memory for large requests
     writeMaxBytes: 32 * 1024 * 1024,
     acceptCompression: [compressionBrotli, compressionGzip],
+    interceptors: [
+      (next) => (req) => {
+        const parentSpan = req.contextValues?.get({
+          id: sentrySpanId,
+          defaultValue: undefined,
+        });
+        if (parentSpan) {
+          return Sentry.withActiveSpan(parentSpan, () => next(req));
+        }
+        return next(req);
+      },
+    ],
   });
 
   await fastify.register(fastifyGracefulShutdown, {
@@ -528,6 +629,12 @@ export default async function build(opts: BuildConfig) {
     await Promise.all(bullWorkers.map((worker) => worker.close()));
 
     fastify.log.debug('Bull workers shut down');
+
+    fastify.log.debug('Shutting down composition worker pool');
+
+    await destroyComposeGraphsPool();
+
+    fastify.log.debug('Composition worker pool shut down');
   });
 
   return fastify;

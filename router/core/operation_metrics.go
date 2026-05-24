@@ -2,18 +2,15 @@ package core
 
 import (
 	"context"
-	"math/rand/v2"
-	"slices"
+	"errors"
 	"time"
 
-	rotel "github.com/wundergraph/cosmo/router/pkg/otel"
+	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
-
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.uber.org/zap"
 
-	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
-
-	"go.opentelemetry.io/otel/attribute"
+	rotel "github.com/wundergraph/cosmo/router/pkg/otel"
 )
 
 type OperationProtocol string
@@ -31,22 +28,14 @@ func (p OperationProtocol) String() string {
 // OperationMetrics is a struct that holds the metrics for an operation. It should be created on the parent router request
 // subgraph metrics are created in the transport or engine loader hooks.
 type OperationMetrics struct {
-	requestContentLength int64
-	routerMetrics        RouterMetrics
-	operationStartTime   time.Time
-	inflightMetric       func()
-	routerConfigVersion  string
-	logger               *zap.Logger
-	trackUsageInfo       bool
-
-	promSchemaUsageEnabled      bool
-	promSchemaUsageIncludeOpSha bool
-	promSchemaUsageSampleRate   float64
-}
-
-type usageKey struct {
-	fieldName  string
-	parentType string
+	requestContentLength     int64
+	routerMetrics            RouterMetrics
+	operationStartTime       time.Time
+	inflightMetric           func()
+	routerConfigVersion      string
+	logger                   *zap.Logger
+	trackUsageInfo           bool
+	prometheusTrackUsageInfo bool
 }
 
 func (m *OperationMetrics) Finish(reqContext *requestContext, statusCode int, responseSize int, exportSynchronous bool) {
@@ -68,7 +57,10 @@ func (m *OperationMetrics) Finish(reqContext *requestContext, statusCode int, re
 
 	o := otelmetric.WithAttributeSet(attribute.NewSet(attrs...))
 
-	if reqContext.error != nil {
+	// Client disconnections are not server-side errors and should not inflate error metrics.
+	isError := reqContext.error != nil && !errors.Is(reqContext.error, context.Canceled)
+
+	if isError {
 		rm.MeasureRequestError(ctx, sliceAttrs, o)
 
 		attrs = append(attrs, rotel.WgRequestError.Bool(true))
@@ -84,66 +76,41 @@ func (m *OperationMetrics) Finish(reqContext *requestContext, statusCode int, re
 	rm.MeasureRequestSize(ctx, m.requestContentLength, sliceAttrs, o)
 	rm.MeasureResponseSize(ctx, int64(responseSize), sliceAttrs, o)
 
-	if m.trackUsageInfo && reqContext.operation != nil && !reqContext.operation.executionOptions.SkipLoader {
-		m.routerMetrics.ExportSchemaUsageInfo(reqContext.operation, statusCode, reqContext.error != nil, exportSynchronous)
+	// Record operation cost metrics from cached values
+	if reqContext.operation != nil {
+		if reqContext.operation.costEstimatedSet {
+			rm.MeasureOperationCostEstimated(ctx, int64(reqContext.operation.costEstimated), sliceAttrs, o)
+		}
+		if reqContext.operation.costActualSet {
+			rm.MeasureOperationCostActual(ctx, int64(reqContext.operation.costActual), sliceAttrs, o)
+		}
 	}
 
-	// Prometheus usage metrics, disabled by default
-	if m.promSchemaUsageEnabled && reqContext.operation != nil {
-
-		if !m.shouldSampleOperation() {
-			return
+	// Export schema usage info to configured exporters.
+	// Client disconnections are excluded from the error flag to stay consistent with
+	// the error metrics above.
+	if reqContext.operation != nil && !reqContext.operation.executionOptions.SkipLoader {
+		// GraphQL metrics export (to metrics service)
+		if m.trackUsageInfo {
+			m.routerMetrics.ExportSchemaUsageInfo(reqContext.operation, statusCode, isError, exportSynchronous)
 		}
 
-		opAttrs := []attribute.KeyValue{
-			rotel.WgOperationName.String(reqContext.operation.name),
-			rotel.WgOperationType.String(reqContext.operation.opType),
+		// Prometheus metrics export (to local Prometheus metrics)
+		if m.prometheusTrackUsageInfo {
+			m.routerMetrics.ExportSchemaUsageInfoPrometheus(reqContext.operation, statusCode, isError, exportSynchronous)
 		}
-
-		// Include operation SHA256 if enabled
-		if m.promSchemaUsageIncludeOpSha && reqContext.operation.sha256Hash != "" {
-			opAttrs = append(opAttrs, rotel.WgOperationSha256.String(reqContext.operation.sha256Hash))
-		}
-
-		usageCounts := make(map[usageKey]int)
-
-		for _, field := range reqContext.operation.typeFieldUsageInfo {
-			if field.ExactParentTypeName == "" || len(field.Path) == 0 {
-				continue
-			}
-
-			key := usageKey{
-				fieldName:  field.Path[len(field.Path)-1],
-				parentType: field.ExactParentTypeName,
-			}
-
-			usageCounts[key]++
-		}
-
-		for key, count := range usageCounts {
-			fieldAttrs := []attribute.KeyValue{
-				rotel.WgGraphQLFieldName.String(key.fieldName),
-				rotel.WgGraphQLParentType.String(key.parentType),
-			}
-
-			rm.MeasureSchemaFieldUsage(ctx, int64(count), []attribute.KeyValue{}, otelmetric.WithAttributeSet(attribute.NewSet(slices.Concat(opAttrs, fieldAttrs)...)))
-		}
-
 	}
 }
 
 type OperationMetricsOptions struct {
-	InFlightAddOption    otelmetric.AddOption
-	SliceAttributes      []attribute.KeyValue
-	RouterConfigVersion  string
-	RequestContentLength int64
-	RouterMetrics        RouterMetrics
-	Logger               *zap.Logger
-	TrackUsageInfo       bool
-
-	PrometheusSchemaUsageEnabled      bool
-	PrometheusSchemaUsageIncludeOpSha bool
-	PrometheusSchemaUsageSampleRate   float64
+	InFlightAddOption        otelmetric.AddOption
+	SliceAttributes          []attribute.KeyValue
+	RouterConfigVersion      string
+	RequestContentLength     int64
+	RouterMetrics            RouterMetrics
+	Logger                   *zap.Logger
+	TrackUsageInfo           bool
+	PrometheusTrackUsageInfo bool
 }
 
 // newOperationMetrics creates a new OperationMetrics struct and starts the operation metrics.
@@ -153,38 +120,13 @@ func newOperationMetrics(opts OperationMetricsOptions) *OperationMetrics {
 
 	inflightMetric := opts.RouterMetrics.MetricStore().MeasureInFlight(context.Background(), opts.SliceAttributes, opts.InFlightAddOption)
 	return &OperationMetrics{
-		requestContentLength: opts.RequestContentLength,
-		operationStartTime:   operationStartTime,
-		inflightMetric:       inflightMetric,
-		routerConfigVersion:  opts.RouterConfigVersion,
-		routerMetrics:        opts.RouterMetrics,
-		logger:               opts.Logger,
-		trackUsageInfo:       opts.TrackUsageInfo,
-
-		promSchemaUsageEnabled:      opts.PrometheusSchemaUsageEnabled,
-		promSchemaUsageIncludeOpSha: opts.PrometheusSchemaUsageIncludeOpSha,
-		promSchemaUsageSampleRate:   opts.PrometheusSchemaUsageSampleRate,
+		requestContentLength:     opts.RequestContentLength,
+		operationStartTime:       operationStartTime,
+		inflightMetric:           inflightMetric,
+		routerConfigVersion:      opts.RouterConfigVersion,
+		routerMetrics:            opts.RouterMetrics,
+		logger:                   opts.Logger,
+		trackUsageInfo:           opts.TrackUsageInfo,
+		prometheusTrackUsageInfo: opts.PrometheusTrackUsageInfo,
 	}
-}
-
-// shouldSampleOperation determines if a request should be sampled for schema field usage metrics.
-// Uses probabilistic random sampling to ensure uniform distribution across all operations.
-//
-// This ensures:
-// - All operations get statistical coverage (~X% of requests per operation)
-// - Uniform distribution regardless of request ID format
-// - Supports ANY sample rate (0.0 to 1.0), including arbitrary values like 0.8, 0.156, etc.
-//
-// Note: Uses non-deterministic random sampling rather than hash-based sampling because
-// sequential request IDs produce clustered hash values that break deterministic sampling.
-func (m *OperationMetrics) shouldSampleOperation() bool {
-	if m.promSchemaUsageSampleRate >= 1.0 {
-		return true
-	}
-	if m.promSchemaUsageSampleRate <= 0.0 {
-		return false
-	}
-
-	// Probabilistic sampling: simple, reliable, and guaranteed uniform distribution
-	return rand.Float64() < m.promSchemaUsageSampleRate
 }

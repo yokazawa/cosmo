@@ -15,6 +15,7 @@ import prompts from 'prompts';
 import semver from 'semver';
 import { camelCase, upperFirst } from 'lodash-es';
 import pupa from 'pupa';
+import { program } from 'commander';
 import { dataDir } from '../../../../core/config.js';
 import TsTemplates from './templates/typescript.js';
 import { renderValidationResults } from './helper.js';
@@ -441,12 +442,27 @@ async function installTools(language: string, shouldCleanup: boolean) {
   const tmpDir = join(TOOLS_DIR, 'download');
   const scriptPath = join(tmpDir, 'install-proto-tools.sh');
 
+  let existingVersions: Record<string, string> = {};
+
   // Make installation idempotent - remove existing tools directory if it exists
-  if (shouldCleanup && existsSync(TOOLS_DIR)) {
-    try {
-      await rm(TOOLS_DIR, { recursive: true, force: true });
-    } catch (error) {
-      throw new Error(`Failed to remove existing tools: ${error}`);
+  if (existsSync(TOOLS_DIR)) {
+    if (shouldCleanup) {
+      try {
+        await rm(TOOLS_DIR, { recursive: true, force: true });
+      } catch (error) {
+        throw new Error(`Failed to remove existing tools: ${error}`);
+      }
+    } else {
+      try {
+        const storedVersionsStr = await readFile(TOOLS_VERSIONS_FILE, 'utf8');
+        existingVersions = JSON.parse(storedVersionsStr);
+      } catch (error) {
+        console.log(
+          pc.yellow(`Warning: Failed to read existing tool versions: ${error}, version file will be overridden`),
+        );
+        // Reset the existing versions just in case existing versions was modified while an error was thrown
+        existingVersions = {};
+      }
     }
   }
 
@@ -477,7 +493,7 @@ async function installTools(language: string, shouldCleanup: boolean) {
     };
 
     // Store exact versions that we install
-    const exactVersions: Record<string, string> = {};
+    const exactVersions: Record<string, string> = existingVersions;
 
     const toolVersions = LanguageSpecificTools[language];
 
@@ -531,27 +547,31 @@ export async function generateProtoAndMapping(pluginDir: string, protoOptions: P
 
   const serviceName = upperFirst(camelCase(pluginName)) + 'Service';
 
-  // Validate the GraphQL schema and render results
-  spinner.text = 'Validating GraphQL schema...';
-  const validationResult = validateGraphQLSDL(schema);
-  renderValidationResults(validationResult, schemaFile);
+  try {
+    // Validate the GraphQL schema and render results
+    spinner.text = 'Validating GraphQL schema...';
+    const validationResult = validateGraphQLSDL(schema);
+    renderValidationResults(validationResult, schemaFile);
 
-  spinner.text = 'Generating mapping and proto files...';
+    spinner.text = 'Generating mapping and proto files...';
 
-  const mapping = compileGraphQLToMapping(schema, serviceName);
-  await writeFile(resolve(generatedDir, 'mapping.json'), JSON.stringify(mapping, null, 2));
+    const mapping = compileGraphQLToMapping(schema, serviceName);
+    await writeFile(resolve(generatedDir, 'mapping.json'), JSON.stringify(mapping, null, 2));
 
-  const proto = compileGraphQLToProto(schema, {
-    serviceName,
-    packageName: 'service',
-    protoOptions,
-    lockData,
-  });
+    const proto = compileGraphQLToProto(schema, {
+      serviceName,
+      packageName: 'service',
+      protoOptions,
+      lockData,
+    });
 
-  await writeFile(resolve(generatedDir, 'service.proto'), proto.proto);
-  await writeFile(resolve(generatedDir, 'service.proto.lock.json'), JSON.stringify(proto.lockData, null, 2));
+    await writeFile(resolve(generatedDir, 'service.proto'), proto.proto);
+    await writeFile(resolve(generatedDir, 'service.proto.lock.json'), JSON.stringify(proto.lockData, null, 2));
 
-  return { serviceName };
+    return { serviceName };
+  } catch (error) {
+    program.error(error instanceof Error ? error.message : String(error));
+  }
 }
 
 /**

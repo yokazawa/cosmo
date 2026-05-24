@@ -4,6 +4,7 @@ import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '../../db/schema.js';
 import { AuthenticationError } from '../errors/errors.js';
 import { OrganizationRepository } from '../repositories/OrganizationRepository.js';
+import { traced } from '../tracing.js';
 import { RBACEvaluator } from './RBACEvaluator.js';
 
 export type ApiKeyAuthContext = {
@@ -17,6 +18,7 @@ export type ApiKeyAuthContext = {
   rbac: RBACEvaluator;
 };
 
+@traced
 export default class ApiKeyAuthenticator {
   constructor(
     private db: PostgresJsDatabase<typeof schema>,
@@ -38,11 +40,11 @@ export default class ApiKeyAuthenticator {
     });
 
     if (!apiKeyModel || !apiKeyModel.user) {
-      throw new Error('Invalid api key');
+      throw new AuthenticationError(EnumStatusCode.ERROR_NOT_AUTHENTICATED, 'Invalid api key');
     }
 
     if (apiKeyModel?.expiresAt && apiKeyModel.expiresAt < new Date()) {
-      throw new Error('Api key is expired');
+      throw new AuthenticationError(EnumStatusCode.ERROR_NOT_AUTHENTICATED, 'Api key is expired');
     }
 
     const organization = await this.orgRepo.byId(apiKeyModel.organizationId);

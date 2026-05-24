@@ -11,9 +11,11 @@ import {
   users,
 } from '../../db/schema.js';
 import { DateRange, GraphCompositionDTO } from '../../types/index.js';
-import { ComposedSubgraph } from '../composition/composer.js';
+import { CompositionSubgraphRecord } from '../composition/composer.js';
+import { traced } from '../tracing.js';
 import { FederatedGraphRepository } from './FederatedGraphRepository.js';
 
+@traced
 export class GraphCompositionRepository {
   constructor(
     private logger: FastifyBaseLogger,
@@ -38,7 +40,7 @@ export class GraphCompositionRepository {
     compositionErrorString: string;
     compositionWarningString: string;
     routerConfigSignature?: string;
-    composedSubgraphs: ComposedSubgraph[];
+    composedSubgraphs: CompositionSubgraphRecord[];
     composedById: string;
     admissionErrorString?: string;
     deploymentErrorString?: string;
@@ -214,7 +216,7 @@ export class GraphCompositionRepository {
       .from(graphCompositions)
       .innerJoin(schemaVersion, eq(schemaVersion.id, graphCompositions.schemaVersionId))
       .leftJoin(users, eq(graphCompositions.createdById, users.id))
-      .where(eq(graphCompositions.id, input.compositionId))
+      .where(and(eq(graphCompositions.id, input.compositionId), eq(schemaVersion.organizationId, input.organizationId)))
       .orderBy(desc(schemaVersion.createdAt))
       .execute();
 
@@ -269,7 +271,12 @@ export class GraphCompositionRepository {
       .from(graphCompositions)
       .innerJoin(schemaVersion, eq(schemaVersion.id, graphCompositions.schemaVersionId))
       .leftJoin(users, eq(graphCompositions.createdById, users.id))
-      .where(eq(graphCompositions.schemaVersionId, input.schemaVersionId))
+      .where(
+        and(
+          eq(graphCompositions.schemaVersionId, input.schemaVersionId),
+          eq(schemaVersion.organizationId, input.organizationId),
+        ),
+      )
       .orderBy(desc(schemaVersion.createdAt))
       .execute();
 

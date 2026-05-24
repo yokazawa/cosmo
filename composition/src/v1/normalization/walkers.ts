@@ -1,4 +1,4 @@
-import { ConstDirectiveNode, DocumentNode, Kind, visit } from 'graphql';
+import { type ConstDirectiveNode, type DocumentNode, Kind, visit } from 'graphql';
 import {
   duplicateEnumValueDefinitionError,
   duplicateFieldDefinitionError,
@@ -7,7 +7,7 @@ import {
   invalidOperationTypeDefinitionError,
   unexpectedParentKindForChildError,
 } from '../../errors/errors';
-import { NormalizationFactory } from './normalization-factory';
+import { type NormalizationFactory } from './normalization-factory';
 import { BASE_SCALARS, V2_DIRECTIVE_DEFINITION_BY_DIRECTIVE_NAME } from '../constants/constants';
 import { upsertEntityData } from '../utils/utils';
 import { formatDescription, isNodeInterfaceObject, isObjectLikeNodeEntity } from '../../ast/utils';
@@ -17,14 +17,15 @@ import {
   getRenamedRootTypeName,
   isParentDataCompositeOutputType,
   isTypeNameRootType,
-  newPersistedDirectivesData,
+  newFederatedDirectivesData,
 } from '../../schema-building/utils';
-import { ConfigureDescriptionData, InputValueData } from '../../schema-building/types';
+import { type ConfigureDescriptionData, type InputValueData } from '../../schema-building/types/types';
 import { getMutableEnumValueNode, getTypeNodeNamedTypeName } from '../../schema-building/ast';
-import { GraphNode, RootNode } from '../../resolvability-graph/graph-nodes';
+import { type GraphNode, type RootNode } from '../../resolvability-graph/graph-nodes';
 import { requiresDefinedOnNonEntityFieldWarning } from '../warnings/warnings';
 import {
   ANY_SCALAR,
+  COMPOSE_DIRECTIVE,
   ENTITY_UNION,
   IGNORED_FIELDS,
   PARENT_DEFINITION_DATA,
@@ -32,10 +33,10 @@ import {
   REQUIRES,
   SERVICE_OBJECT,
 } from '../../utils/string-constants';
-import { RootTypeName } from '../../utils/types';
+import { type RootTypeName } from '../../utils/types';
 import { getOrThrowError, getValueOrDefault, kindToNodeType } from '../../utils/utils';
-import { KeyFieldSetData } from './types';
-import { FieldName, TypeName } from '../../types/types';
+import { type KeyFieldSetData } from './types/types';
+import { type FieldName, type TypeName } from '../../types/types';
 
 /* Walker to collect schema definition, directive definitions, and entities.
  * Directives are not validated upon immediate extract because all types must be recorded first.
@@ -48,6 +49,7 @@ export function upsertDirectiveSchemaAndEntityDefinitions(nf: NormalizationFacto
         nf.referencedDirectiveNames.add(name);
         if (EVENT_DIRECTIVE_NAMES.has(name)) {
           nf.edfsDirectiveReferences.add(name);
+          return false;
         }
         if (V2_DIRECTIVE_DEFINITION_BY_DIRECTIVE_NAME.has(name)) {
           nf.isSubgraphVersionTwo = true;
@@ -274,7 +276,7 @@ export function upsertParentsAndChildren(nf: NormalizationFactory, document: Doc
           name,
           node: getMutableEnumValueNode(node),
           parentTypeName: nf.originalParentTypeName,
-          persistedDirectivesData: newPersistedDirectivesData(),
+          federatedDirectivesData: newFederatedDirectivesData(),
           subgraphNames: new Set([nf.subgraphName]),
           description: formatDescription(node.description),
         });
